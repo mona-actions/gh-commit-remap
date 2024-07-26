@@ -4,6 +4,7 @@ Copyright © 2024 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -56,18 +57,48 @@ func init() {
 
 func main(cmd *cobra.Command, args []string) {
 	// Adjust the file path as necessary
-	filePath := "test/commit-map"
-	commitMap, err := parseCommitMap(filePath)
+	mapPath := "test/TestRepo.git/filter-repo/commit-map"
+	commitMap, err := parseCommitMap(mapPath)
 	if err != nil {
 		log.Fatalf("Error parsing commit map: %v", err)
 	}
 
-	fmt.Println(commitMap)
+	// Adjust the file path as necessary
+	prPath := "test/3723ff5e-4b7e-11ef-9bf5-2aca377420b3/pull_requests_000001.json"
+
+	// Read the JSON file containing the pull request metadata
+	prData, err := os.ReadFile(prPath)
+	if err != nil {
+		log.Fatalf("Error reading pull request data: %v", err)
+	}
+
+	var prDataMap interface{}
+	err = json.Unmarshal(prData, &prDataMap)
+	if err != nil {
+		log.Fatalf("Error unmarshaling pull request data: %v", err)
+	}
+
+	// Iterate over the commit map and replace the old commit hashes with the new commit hashes
+	for _, commit := range *commitMap {
+		replaceSHA(prDataMap, commit.Old, commit.New)
+	}
+
+	// Marshal the updated pull request metadata to JSON and pretty print it
+
+	updatedPrData, err := json.MarshalIndent(prDataMap, "", "  ")
+	if err != nil {
+		log.Fatalf("Error marshaling updated pull request data: %v", err)
+	}
+
+	// Overwrite the original file with the updated data
+	err = os.WriteFile(prPath, updatedPrData, 0644)
+	if err != nil {
+		log.Fatalf("Error writing updated pull request data: %v", err)
+	}
 }
 
 // Parses the file and returns a map of old commit hashes to new commit hashes
 func parseCommitMap(filePath string) (*[]CommitMapEntry, error) {
-
 	commitMap := []CommitMapEntry{}
 
 	// Read the commit-map file
@@ -93,22 +124,33 @@ func parseCommitMap(filePath string) (*[]CommitMapEntry, error) {
 			Old: fields[0],
 			New: fields[1],
 		})
-
 	}
 	return &commitMap, nil
 }
 
-func startOrgMigration(org string, repos []string) error {
-	// Implement the org migration here
-	return nil
-}
+func replaceSHA(data interface{}, oldSHA, newSHA string) {
+	if data == nil {
+		return
+	}
 
-func downloadOrgMigrationArchive(org string) error {
-	// Implement the download of the org migration archive here
-	return nil
-}
-
-func applyCommitMap(commitMap *[]CommitMapEntry) error {
-	// Implement the application of the commit map here
-	return nil
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for key, value := range v {
+			if str, ok := value.(string); ok && str == oldSHA {
+				v[key] = newSHA
+			} else {
+				replaceSHA(value, oldSHA, newSHA)
+			}
+		}
+	case []interface{}:
+		for i, value := range v {
+			if str, ok := value.(string); ok && str == oldSHA {
+				v[i] = newSHA
+			} else {
+				replaceSHA(value, oldSHA, newSHA)
+			}
+		}
+	default:
+		// Unsupported type, do nothing
+	}
 }

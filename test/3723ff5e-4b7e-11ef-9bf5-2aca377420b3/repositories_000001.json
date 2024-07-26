@@ -1,0 +1,135 @@
+[
+  {
+    "type": "repository",
+    "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo",
+    "owner": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test",
+    "name": "TestRepo",
+    "description": null,
+    "website": null,
+    "private": true,
+    "has_issues": true,
+    "has_wiki": true,
+    "has_downloads": true,
+    "is_archived": false,
+    "labels": [
+      {
+        "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/labels/bug",
+        "name": "bug",
+        "color": "d73a4a",
+        "description": "Something isn't working",
+        "created_at": "2024-07-26T14:35:11Z"
+      },
+      {
+        "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/labels/documentation",
+        "name": "documentation",
+        "color": "0075ca",
+        "description": "Improvements or additions to documentation",
+        "created_at": "2024-07-26T14:35:11Z"
+      },
+      {
+        "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/labels/duplicate",
+        "name": "duplicate",
+        "color": "cfd3d7",
+        "description": "This issue or pull request already exists",
+        "created_at": "2024-07-26T14:35:11Z"
+      },
+      {
+        "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/labels/enhancement",
+        "name": "enhancement",
+        "color": "a2eeef",
+        "description": "New feature or request",
+        "created_at": "2024-07-26T14:35:11Z"
+      },
+      {
+        "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/labels/good%20first%20issue",
+        "name": "good first issue",
+        "color": "7057ff",
+        "description": "Good for newcomers",
+        "created_at": "2024-07-26T14:35:11Z"
+      },
+      {
+        "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/labels/help%20wanted",
+        "name": "help wanted",
+        "color": "008672",
+        "description": "Extra attention is needed",
+        "created_at": "2024-07-26T14:35:11Z"
+      },
+      {
+        "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/labels/invalid",
+        "name": "invalid",
+        "color": "e4e669",
+        "description": "This doesn't seem right",
+        "created_at": "2024-07-26T14:35:11Z"
+      },
+      {
+        "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/labels/question",
+        "name": "question",
+        "color": "d876e3",
+        "description": "Further information is requested",
+        "created_at": "2024-07-26T14:35:11Z"
+      },
+      {
+        "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/labels/wontfix",
+        "name": "wontfix",
+        "color": "ffffff",
+        "description": "This will not be worked on",
+        "created_at": "2024-07-26T14:35:11Z"
+      }
+    ],
+    "collaborators": [
+      {
+        "user": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/amenocal",
+        "permission": "admin"
+      }
+    ],
+    "created_at": "2024-07-26T14:35:10Z",
+    "git_url": "tarball://root/repositories/Test/TestRepo.git",
+    "default_branch": "main",
+    "webhooks": [
+
+    ],
+    "page": null,
+    "public_keys": [
+
+    ],
+    "repository_topics": [
+
+    ],
+    "security_and_analysis": {
+      "dependency_graph": false,
+      "vulnerability_alerts": false,
+      "vulnerability_updates": false,
+      "advanced_security": false,
+      "token_scanning": false,
+      "token_scanning_push_protection": false
+    },
+    "autolinks": [
+
+    ],
+    "general_settings": {
+      "template": false,
+      "allow_forking": false,
+      "sponsorships": false,
+      "projects": true,
+      "discussions": false,
+      "merge_commit": true,
+      "squash_merge": true,
+      "rebase_merge": true,
+      "auto_merge": false,
+      "delete_branch_heads": false,
+      "update_branch": false,
+      "git_lfs_in_archives": false
+    },
+    "actions_general_settings": {
+      "actions_disabled": false,
+      "allows_all_actions": true,
+      "allows_local_actions_only": false,
+      "allows_github_owned_actions": false,
+      "allows_verified_actions": false,
+      "allows_specific_actions_patterns": false,
+      "patterns": [
+
+      ]
+    }
+  }
+]

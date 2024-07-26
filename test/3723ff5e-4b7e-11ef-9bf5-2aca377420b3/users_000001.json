@@ -1,0 +1,48 @@
+[
+  {
+    "type": "user",
+    "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/kuhlman-labs",
+    "avatar_url": "https://avatars.kuhlman-labs-03403a53280db4479.ghe-test.ninja/u/6",
+    "login": "kuhlman-labs",
+    "name": null,
+    "bio": null,
+    "company": null,
+    "website": null,
+    "location": null,
+    "emails": [
+      {
+        "address": "6+kuhlman-labs@users.noreply.kuhlman-labs-03403a53280db4479.ghe-test.ninja",
+        "primary": true,
+        "verified": true
+      }
+    ],
+    "social_accounts": [
+
+    ],
+    "billing_plan": null,
+    "created_at": "2024-06-05T20:54:20Z"
+  },
+  {
+    "type": "user",
+    "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/amenocal",
+    "avatar_url": "https://avatars.kuhlman-labs-03403a53280db4479.ghe-test.ninja/u/10",
+    "login": "amenocal",
+    "name": null,
+    "bio": null,
+    "company": null,
+    "website": null,
+    "location": null,
+    "emails": [
+      {
+        "address": "10+amenocal@users.noreply.kuhlman-labs-03403a53280db4479.ghe-test.ninja",
+        "primary": true,
+        "verified": true
+      }
+    ],
+    "social_accounts": [
+
+    ],
+    "billing_plan": null,
+    "created_at": "2024-07-26T14:30:56Z"
+  }
+]

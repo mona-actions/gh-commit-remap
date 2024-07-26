@@ -1,0 +1,96 @@
+[
+  {
+    "type": "organization",
+    "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test",
+    "login": "Test",
+    "name": null,
+    "description": null,
+    "website": null,
+    "location": null,
+    "email": "7+Test@users.noreply.kuhlman-labs-03403a53280db4479.ghe-test.ninja",
+    "members": [
+      {
+        "user": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/kuhlman-labs",
+        "role": "admin",
+        "state": "active"
+      },
+      {
+        "user": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/amenocal",
+        "role": "admin",
+        "state": "active"
+      }
+    ],
+    "owners_team": null,
+    "webhooks": [
+
+    ],
+    "created_at": "2024-06-05T20:56:38Z",
+    "member_privileges": {
+      "default_repository_permission": "read",
+      "members_can_create_public_repositories": true,
+      "members_can_create_private_repositories": true,
+      "members_can_create_internal_repositories": true,
+      "members_can_invite_outside_collaborators": true,
+      "allows_private_repository_forking": false,
+      "members_can_create_pages": true,
+      "members_can_change_repo_visibility": true,
+      "members_can_delete_repositories": true,
+      "members_can_delete_issues": false,
+      "display_commenter_full_name_setting_enabled": true,
+      "readers_can_create_discussions": true,
+      "members_can_create_teams": true,
+      "members_can_view_dependency_insights": true
+    },
+    "repository_defaults": {
+      "repository_default_branch": "main",
+      "commit_signoff": false,
+      "repository_labels": [
+        {
+          "name": "bug",
+          "description": "Something isn't working",
+          "color": "d73a4a"
+        },
+        {
+          "name": "documentation",
+          "description": "Improvements or additions to documentation",
+          "color": "0075ca"
+        },
+        {
+          "name": "duplicate",
+          "description": "This issue or pull request already exists",
+          "color": "cfd3d7"
+        },
+        {
+          "name": "enhancement",
+          "description": "New feature or request",
+          "color": "a2eeef"
+        },
+        {
+          "name": "good first issue",
+          "description": "Good for newcomers",
+          "color": "7057ff"
+        },
+        {
+          "name": "help wanted",
+          "description": "Extra attention is needed",
+          "color": "008672"
+        },
+        {
+          "name": "invalid",
+          "description": "This doesn't seem right",
+          "color": "e4e669"
+        },
+        {
+          "name": "question",
+          "description": "Further information is requested",
+          "color": "d876e3"
+        },
+        {
+          "name": "wontfix",
+          "description": "This will not be worked on",
+          "color": "ffffff"
+        }
+      ]
+    }
+  }
+]

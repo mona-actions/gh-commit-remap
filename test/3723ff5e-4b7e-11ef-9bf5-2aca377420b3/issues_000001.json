@@ -1,0 +1,24 @@
+[
+  {
+    "type": "issue",
+    "url": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo/issues/5",
+    "repository": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/Test/TestRepo",
+    "user": "https://kuhlman-labs-03403a53280db4479.ghe-test.ninja/kuhlman-labs",
+    "title": "Test Issue",
+    "body": "#3 \r\n\r\nThis is an issue that references PR3",
+    "assignee": null,
+    "assignees": [
+
+    ],
+    "milestone": null,
+    "labels": [
+
+    ],
+    "reactions": [
+
+    ],
+    "closed_at": null,
+    "created_at": "2024-07-26T14:58:43Z",
+    "updated_at": "2024-07-26T14:58:43Z"
+  }
+]
