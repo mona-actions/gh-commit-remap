@@ -9,13 +9,13 @@ import (
 
 // Struct to represent a single entry in the commit map
 type CommitMapEntry struct {
-	Old string `yaml:"old"`
-	New string `yaml:"new"`
+	Old string
+	New string
 }
 
 func main() {
 	// Adjust the file path as necessary
-	filePath := "commit-map"
+	filePath := "test/commit-map"
 	commitMap, err := parseCommitMap(filePath)
 	if err != nil {
 		log.Fatalf("Error parsing commit map: %v", err)
@@ -55,4 +55,19 @@ func parseCommitMap(filePath string) (*[]CommitMapEntry, error) {
 
 	}
 	return &commitMap, nil
+}
+
+func startOrgMigration(org string, repos []string) error {
+	// Implement the org migration here
+	return nil
+}
+
+func downloadOrgMigrationArchive(org string) error {
+	// Implement the download of the org migration archive here
+	return nil
+}
+
+func applyCommitMap(commitMap *[]CommitMapEntry) error {
+	// Implement the application of the commit map here
+	return nil
 }
