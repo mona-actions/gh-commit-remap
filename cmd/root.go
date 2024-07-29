@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -56,45 +57,22 @@ func init() {
 }
 
 func main(cmd *cobra.Command, args []string) {
-	// Adjust the file path as necessary
-	mapPath := "test/TestRepo.git/filter-repo/commit-map"
+	// leaving this for now to quickly test the code
+	//mapPath := "test/TestRepo.git/filter-repo/commit-map"
+	mapPath, _ := cmd.Flags().GetString("mapping-file")
 	commitMap, err := parseCommitMap(mapPath)
 	if err != nil {
 		log.Fatalf("Error parsing commit map: %v", err)
 	}
 
-	// Adjust the file path as necessary
-	prPath := "test/3723ff5e-4b7e-11ef-9bf5-2aca377420b3/pull_requests_000001.json"
+	// config to define the types of files to process
+	types := []string{"pull_requests", "issues"}
 
-	// Read the JSON file containing the pull request metadata
-	prData, err := os.ReadFile(prPath)
-	if err != nil {
-		log.Fatalf("Error reading pull request data: %v", err)
-	}
+	// leaving this for now to quickly test the code
+	//archivePath := "test/3723ff5e-4b7e-11ef-9bf5-2aca377420b3"
+	archivePath, _ := cmd.Flags().GetString("migration-archive")
 
-	var prDataMap interface{}
-	err = json.Unmarshal(prData, &prDataMap)
-	if err != nil {
-		log.Fatalf("Error unmarshaling pull request data: %v", err)
-	}
-
-	// Iterate over the commit map and replace the old commit hashes with the new commit hashes
-	for _, commit := range *commitMap {
-		replaceSHA(prDataMap, commit.Old, commit.New)
-	}
-
-	// Marshal the updated pull request metadata to JSON and pretty print it
-
-	updatedPrData, err := json.MarshalIndent(prDataMap, "", "  ")
-	if err != nil {
-		log.Fatalf("Error marshaling updated pull request data: %v", err)
-	}
-
-	// Overwrite the original file with the updated data
-	err = os.WriteFile(prPath, updatedPrData, 0644)
-	if err != nil {
-		log.Fatalf("Error writing updated pull request data: %v", err)
-	}
+	processFiles(archivePath, types, commitMap)
 }
 
 // Parses the file and returns a map of old commit hashes to new commit hashes
@@ -128,7 +106,7 @@ func parseCommitMap(filePath string) (*[]CommitMapEntry, error) {
 	return &commitMap, nil
 }
 
-func replaceSHA(data interface{}, oldSHA, newSHA string) {
+func replaceSHA(data interface{}, oldSHA string, newSHA string) {
 	if data == nil {
 		return
 	}
@@ -152,5 +130,54 @@ func replaceSHA(data interface{}, oldSHA, newSHA string) {
 		}
 	default:
 		// Unsupported type, do nothing
+	}
+}
+
+func updateMetadataFile(filePath string, commitMap *[]CommitMapEntry) {
+	// Read the JSON file
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		log.Fatalf("Error reading data: %v", err)
+	}
+
+	var dataMap interface{}
+	err = json.Unmarshal(data, &dataMap)
+	if err != nil {
+		log.Fatalf("Error unmarshaling data: %v", err)
+	}
+
+	// Iterate over the commit map and replace the old commit hashes with the new ones
+	for _, commit := range *commitMap {
+		replaceSHA(dataMap, commit.Old, commit.New)
+	}
+
+	// Marshal the updated data to JSON and pretty print it
+	updatedData, err := json.MarshalIndent(dataMap, "", "  ")
+	if err != nil {
+		log.Fatalf("Error marshaling updated data: %v", err)
+	}
+
+	// Overwrite the original file with the updated data
+	err = os.WriteFile(filePath, updatedData, 0644)
+	if err != nil {
+		log.Fatalf("Error writing updated data: %v", err)
+	}
+}
+
+func processFiles(archiveLocation string, prefixes []string, commitMap *[]CommitMapEntry) {
+
+	for _, prefix := range prefixes {
+		// Get a list of all files that match the pattern
+		files, err := filepath.Glob(filepath.Join(archiveLocation, prefix+"_*.json"))
+		if err != nil {
+			log.Fatalf("Error getting files: %v", err)
+		}
+
+		// Process each file
+		for _, file := range files {
+			log.Println("Processing file:", file)
+
+			updateMetadataFile(file, commitMap)
+		}
 	}
 }
