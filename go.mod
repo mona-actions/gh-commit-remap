@@ -1,4 +1,4 @@
-module github.com/kuhlman-labs/gh-commit-remap
+module github.com/mona-actions/gh-commit-remap
 
 go 1.22.5
 
