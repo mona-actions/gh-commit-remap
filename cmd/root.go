@@ -33,7 +33,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		// config to define the types of files to process
-		types := []string{"pull_requests", "issues"}
+		types := []string{"pull_requests", "issues", "issue_events"}
 
 		archivePath, _ := cmd.Flags().GetString("migration-archive")
 
