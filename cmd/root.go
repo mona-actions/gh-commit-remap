@@ -35,9 +35,7 @@ var rootCmd = &cobra.Command{
 		// config to define the types of files to process
 		types := []string{"pull_requests", "issues"}
 
-		// leaving this for now to quickly test the code
-		archivePath := "test/3723ff5e-4b7e-11ef-9bf5-2aca377420b3"
-		// archivePath, _ := cmd.Flags().GetString("migration-archive")
+		archivePath, _ := cmd.Flags().GetString("migration-archive")
 
 		commitremap.ProcessFiles(archivePath, types, commitMap)
 	},
