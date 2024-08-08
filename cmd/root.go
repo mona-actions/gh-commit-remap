@@ -43,10 +43,12 @@ var rootCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 
-		err = archive.ReTar(archivePath)
+		tarPath, err := archive.ReTar(archivePath)
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		log.Printf("New archive created: %s", tarPath)
 
 	},
 }
