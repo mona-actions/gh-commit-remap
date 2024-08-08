@@ -46,7 +46,7 @@ func ParseCommitMap(filePath string) (*[]CommitMapEntry, error) {
 	return &commitMap, nil
 }
 
-func ProcessFiles(archiveLocation string, prefixes []string, commitMap *[]CommitMapEntry) {
+func ProcessFiles(archiveLocation string, prefixes []string, commitMap *[]CommitMapEntry) error {
 
 	for _, prefix := range prefixes {
 		// Get a list of all files that match the pattern
@@ -59,22 +59,26 @@ func ProcessFiles(archiveLocation string, prefixes []string, commitMap *[]Commit
 		for _, file := range files {
 			log.Println("Processing file:", file)
 
-			updateMetadataFile(file, commitMap)
+			err := updateMetadataFile(file, commitMap)
+			if err != nil {
+				return fmt.Errorf("Error updating metadata file: %v; %v", file, err)
+			}
 		}
 	}
+	return nil
 }
 
-func updateMetadataFile(filePath string, commitMap *[]CommitMapEntry) {
+func updateMetadataFile(filePath string, commitMap *[]CommitMapEntry) error {
 	// Read the JSON file
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Fatalf("Error reading data: %v", err)
+		return fmt.Errorf("Error reading data: %v", err)
 	}
 
 	var dataMap interface{}
 	err = json.Unmarshal(data, &dataMap)
 	if err != nil {
-		log.Fatalf("Error unmarshaling data: %v", err)
+		return fmt.Errorf("Error unmarshaling data: %v", err)
 	}
 
 	// Iterate over the commit map and replace the old commit hashes with the new ones
@@ -85,14 +89,16 @@ func updateMetadataFile(filePath string, commitMap *[]CommitMapEntry) {
 	// Marshal the updated data to JSON and pretty print it
 	updatedData, err := json.MarshalIndent(dataMap, "", "  ")
 	if err != nil {
-		log.Fatalf("Error marshaling updated data: %v", err)
+		return fmt.Errorf("Error marshaling updated data: %v", err)
 	}
 
 	// Overwrite the original file with the updated data
 	err = os.WriteFile(filePath, updatedData, 0644)
 	if err != nil {
-		log.Fatalf("Error writing updated data: %v", err)
+		return fmt.Errorf("Error writing updated data: %v", err)
 	}
+
+	return nil
 }
 
 func replaceSHA(data interface{}, oldSHA string, newSHA string) {
