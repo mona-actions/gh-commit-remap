@@ -5,7 +5,7 @@ CLI tool to remap commits during a migration after a history rewrite
 ## Install
 
 ```bash
-gh extension install kuhlman-labs/gh-commit-remap
+gh extension install mona-actions/gh-commit-remap
 ```
 
 ## Upgrade
@@ -27,5 +27,5 @@ Usage:
 Flags:
   -h, --help                       help for gh-commit-remap
   -c, --mapping-file string        Path to the commit map file Example: /path/to/commit-map
-  -m, --migration-archive string   Path to the migration archive Example: /path/to/migration-archive.tar.gz
+  -m, --migration-archive string   Path to the migration archive Example: /path/to/migration-archive
 ```
