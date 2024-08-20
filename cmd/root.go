@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/mona-actions/gh-commit-remap/internal/archive"
 	"github.com/mona-actions/gh-commit-remap/internal/commitremap"
 	"github.com/spf13/cobra"
 )
@@ -37,7 +38,18 @@ var rootCmd = &cobra.Command{
 
 		archivePath, _ := cmd.Flags().GetString("migration-archive")
 
-		commitremap.ProcessFiles(archivePath, types, commitMap)
+		err = commitremap.ProcessFiles(archivePath, types, commitMap)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		tarPath, err := archive.ReTar(archivePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		log.Printf("New archive created: %s", tarPath)
+
 	},
 }
 
