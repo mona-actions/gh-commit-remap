@@ -20,7 +20,7 @@ func init() {
 	rootCmd.MarkFlagRequired("migration-archive")
 
 	// Optional flag to specify the number of threads to use for processing
-	rootCmd.Flags().StringP("number-of-threads", "t", "10", "[OPTIONAL] Number of threads(goroutines) to use for processing. Defaults to 10")
+	rootCmd.Flags().IntP("number-of-threads", "t", 10, "[OPTIONAL] Number of threads(goroutines) to use for processing. Defaults to 10")
 }
 
 // rootCmd represents the base command when called without any subcommands
@@ -41,6 +41,12 @@ var rootCmd = &cobra.Command{
 
 		archivePath, _ := cmd.Flags().GetString("migration-archive")
 		workers, _ := cmd.Flags().GetInt("number-of-threads")
+		if workers < 1 {
+			workers = 10
+		}
+		if workers > 50 {
+			log.Fatalf("Number of threads cannot exceed 50")
+		}
 		err = commitremap.ProcessFiles(archivePath, types, commitMap, workers)
 		if err != nil {
 			log.Fatal(err)

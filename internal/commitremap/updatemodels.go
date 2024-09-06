@@ -31,6 +31,7 @@ func updatePullRequests(commitMap map[string]string, pullRequests *[]interface{}
 func updatePullRequestReviews(commitMap map[string]string, pullRequestReview *[]interface{}) error {
 	for _, prr := range *pullRequestReview {
 		if prrMap, ok := prr.(map[string]interface{}); ok {
+			// head_sha
 			if headSha, ok := prrMap["head_sha"].(string); ok {
 				if newSha, ok := commitMap[headSha]; ok {
 					prrMap["head_sha"] = newSha
@@ -63,6 +64,7 @@ func updatePullRequestReviewComments(commitMap map[string]string, pullRequestRev
 func updatePullRequestReviewThreads(commitMap map[string]string, pullRequestReviewThreads *[]interface{}) error {
 	for _, prrt := range *pullRequestReviewThreads {
 		if prrtMap, ok := prrt.(map[string]interface{}); ok {
+			// commit_id, original_commit_id
 			if commitId, ok := prrtMap["commit_id"].(string); ok {
 				if newSha, ok := commitMap[commitId]; ok {
 					prrtMap["commit_id"] = newSha
