@@ -44,7 +44,7 @@ func ParseCommitMap(filePath string) (*map[string]string, error) {
 
 func ProcessFiles(archiveLocation string, prefixes []string,
 	commitMap *map[string]string, workers int) error {
-	workerCount := 10
+	workerCount := workers
 	fileChannel := make(chan File, workerCount)
 	fileProcessWg := sync.WaitGroup{}
 	filesToProcess := getAllFilesToProcess(prefixes, archiveLocation)
