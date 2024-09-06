@@ -28,4 +28,5 @@ Flags:
   -h, --help                       help for gh-commit-remap
   -c, --mapping-file string        Path to the commit map file Example: /path/to/commit-map
   -m, --migration-archive string   Path to the migration archive Example: /path/to/migration-archive
+  -t, --number-of-threads int      [OPTIONAL] Number of threads(goroutines) to use for processing. Defaults to 10"
 ```
