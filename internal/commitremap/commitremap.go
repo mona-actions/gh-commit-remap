@@ -10,7 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
+
+const COMMIT_MAP_HEADER string = "old                                      new"
 
 type File struct {
 	FilePath string
@@ -27,18 +30,23 @@ func ParseCommitMap(filePath string) (*map[string]string, error) {
 		return nil, err
 	}
 	buf := bytes.NewBuffer(content)
+	if buf.Len() == 0 {
+		return &commitMap, nil
+	}
 	scanner := bufio.NewScanner(buf)
 	for scanner.Scan() {
 		line := scanner.Text()
 		// Skip adding the header to the map
-		if line == "old                                      new" {
+		if line == COMMIT_MAP_HEADER {
 			continue
 		}
 		fields := strings.Split(line, " ")
+		oldSha, newSha := fields[0], fields[1]
+
 		if len(fields) != 2 {
 			return nil, fmt.Errorf("invalid line: %s", line)
 		}
-		commitMap[fields[0]] = fields[1]
+		commitMap[oldSha] = newSha
 	}
 	return &commitMap, nil
 }
@@ -52,7 +60,8 @@ func ProcessFiles(archiveLocation string, prefixes []string,
 	filesToProcess := getAllFilesToProcess(prefixes, archiveLocation)
 	totalFiles := len(filesToProcess)
 	processedFiles := make(chan File, totalFiles)
-	processedFilesCount := 0
+	var processedFilesCount atomic.Int64
+
 	// go routine to print out the progress of the processed files. It also
 	// writes the processed files to a log file
 	fmt.Printf("Processed %d/%d files\n", processedFilesCount, totalFiles)
@@ -86,7 +95,7 @@ func ProcessFiles(archiveLocation string, prefixes []string,
 					log.Fatalf("error updating metadata file: %v", err)
 				}
 				processedFiles <- file
-				processedFilesCount++
+				processedFilesCount.Add(1)
 			}
 		}()
 	}
