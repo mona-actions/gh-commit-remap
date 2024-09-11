@@ -18,6 +18,9 @@ func init() {
 
 	rootCmd.Flags().StringP("migration-archive", "m", "", "Path to the migration archive Example: /path/to/migration-archive.tar.gz")
 	rootCmd.MarkFlagRequired("migration-archive")
+
+	// Optional flag to specify the number of threads to use for processing
+	rootCmd.Flags().IntP("number-of-threads", "t", 10, "[OPTIONAL] Number of threads(goroutines) to use for processing. Defaults to 10")
 }
 
 // rootCmd represents the base command when called without any subcommands
@@ -34,20 +37,25 @@ var rootCmd = &cobra.Command{
 		}
 
 		// config to define the types of files to process
-		types := []string{"pull_requests", "issues", "issue_events"}
+		types := []string{"pull_requests", "pull_request_reviews", "pull_request_review_comments", "pull_request_review_threads", "commit_comments"}
 
 		archivePath, _ := cmd.Flags().GetString("migration-archive")
-
-		err = commitremap.ProcessFiles(archivePath, types, commitMap)
+		workers, _ := cmd.Flags().GetInt("number-of-threads")
+		if workers < 1 {
+			workers = 10
+		}
+		if workers > 50 {
+			log.Fatalf("Number of threads cannot exceed 50")
+		}
+		err = commitremap.ProcessFiles(archivePath, types, commitMap, workers)
 		if err != nil {
 			log.Fatal(err)
 		}
-
+		log.Printf("Processed files successfully, re-taring archive")
 		tarPath, err := archive.ReTar(archivePath)
 		if err != nil {
 			log.Fatal(err)
 		}
-
 		log.Printf("New archive created: %s", tarPath)
 
 	},

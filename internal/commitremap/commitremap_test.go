@@ -2,6 +2,7 @@ package commitremap
 
 import (
 	"os"
+	"reflect"
 	"testing"
 )
 
@@ -9,7 +10,7 @@ func TestParseCommitMap(t *testing.T) {
 	tests := []struct {
 		name        string
 		fileContent string
-		expected    *[]CommitMapEntry
+		expected    *map[string]string
 		expectError bool
 	}{
 		{
@@ -17,17 +18,17 @@ func TestParseCommitMap(t *testing.T) {
 			fileContent: `oldSHA1 newSHA1
 oldSHA2 newSHA2
 oldSHA3 newSHA3`,
-			expected: &[]CommitMapEntry{
-				{Old: "oldSHA1", New: "newSHA1"},
-				{Old: "oldSHA2", New: "newSHA2"},
-				{Old: "oldSHA3", New: "newSHA3"},
+			expected: &map[string]string{
+				"oldSHA1": "newSHA1",
+				"oldSHA2": "newSHA2",
+				"oldSHA3": "newSHA3",
 			},
 			expectError: false,
 		},
 		{
 			name:        "Empty file",
 			fileContent: ``,
-			expected:    &[]CommitMapEntry{},
+			expected:    &map[string]string{},
 			expectError: false,
 		},
 		{
@@ -37,6 +38,17 @@ invalidLine
 oldSHA2 newSHA2`,
 			expected:    nil,
 			expectError: true,
+		},
+		{
+			name: "Skips first line (old .... new) and reads the rest",
+			fileContent: `old                                      new
+oldSHA1 newSHA1
+oldSHA2 newSHA2`,
+			expected: &map[string]string{
+				"oldSHA1": "newSHA1",
+				"oldSHA2": "newSHA2",
+			},
+			expectError: false,
 		},
 	}
 
@@ -72,14 +84,9 @@ oldSHA2 newSHA2`,
 				}
 			}
 
-			// Check the result
-			if len(*result) != len(*tt.expected) {
-				t.Fatalf("Expected %d entries, got %d", len(*tt.expected), len(*result))
-			}
-			for i, entry := range *result {
-				if entry.Old != (*tt.expected)[i].Old || entry.New != (*tt.expected)[i].New {
-					t.Errorf("Expected entry %d to be %+v, got %+v", i, (*tt.expected)[i], entry)
-				}
+			// Compare maps for equality and length
+			if !reflect.DeepEqual(*result, *tt.expected) {
+				t.Errorf("Expected %+v, got %+v", *tt.expected, *result)
 			}
 		})
 	}
