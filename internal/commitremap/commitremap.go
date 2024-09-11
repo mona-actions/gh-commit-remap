@@ -48,6 +48,9 @@ func ParseCommitMap(filePath string) (*map[string]string, error) {
 		}
 		commitMap[oldSha] = newSha
 	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
 	return &commitMap, nil
 }
 
