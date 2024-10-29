@@ -41,11 +41,10 @@ func ParseCommitMap(filePath string) (*map[string]string, error) {
 			continue
 		}
 		fields := strings.Split(line, " ")
-		oldSha, newSha := fields[0], fields[1]
-
 		if len(fields) != 2 {
 			return nil, fmt.Errorf("invalid line: %s", line)
 		}
+		oldSha, newSha := fields[0], fields[1]
 		commitMap[oldSha] = newSha
 	}
 	if err := scanner.Err(); err != nil {
