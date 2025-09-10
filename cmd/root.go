@@ -36,16 +36,28 @@ var rootCmd = &cobra.Command{
 		// config to define the types of files to process
 		types := []string{"pull_requests", "issues", "issue_events"}
 
-		archivePath, _ := cmd.Flags().GetString("migration-archive")
+		archiveFile, _ := cmd.Flags().GetString("migration-archive")
 
-		err = commitremap.ProcessFiles(archivePath, types, commitMap)
+		// Extract the provided migration archive so we can modify its JSON contents
+		extractedDir, err := archive.UnTar(archiveFile, "")
+		if err != nil {
+			log.Fatalf("Error extracting migration archive: %v", err)
+		}
+
+		err = commitremap.ProcessFiles(extractedDir, types, commitMap)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		tarPath, err := archive.ReTar(archivePath)
+		// Re-package the modified directory into a new archive
+		tarPath, err := archive.ReTar(extractedDir)
 		if err != nil {
 			log.Fatal(err)
+		}
+
+		// Cleanup extracted directory after successful re-tar
+		if err := os.RemoveAll(extractedDir); err != nil {
+			log.Printf("Warning: failed to remove extracted directory %s: %v", extractedDir, err)
 		}
 
 		log.Printf("New archive created: %s", tarPath)
