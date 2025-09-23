@@ -55,23 +55,20 @@ var rootCmd = &cobra.Command{
 
 		if err := commitremap.ProcessFiles(extractedDir, types, commitMap); err != nil {
 			log.Fatal(err)
-		}
-
-		if untarAndRetar {
+		} else {
 			// Re-package the modified directory into a new archive
 			tarPath, err := archive.ReTar(extractedDir)
 			if err != nil {
 				log.Fatal(err)
 			}
-			// Cleanup extracted directory after successful re-tar
-			if err := os.RemoveAll(extractedDir); err != nil {
-				log.Printf("Warning: failed to remove extracted directory %s: %v", extractedDir, err)
-			}
 			log.Printf("New archive created: %s", tarPath)
-		} else {
-			log.Printf("Processed directory in place: %s", extractedDir)
+			if untarAndRetar {
+				// Cleanup extracted directory after successful re-tar
+				if err := os.RemoveAll(extractedDir); err != nil {
+					log.Printf("Warning: failed to remove extracted directory %s: %v", extractedDir, err)
+				}
+			}
 		}
-
 	},
 }
 
