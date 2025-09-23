@@ -62,3 +62,50 @@ func TestReTar(t *testing.T) {
 		t.Fatalf("Original file content and extracted file content do not match")
 	}
 }
+
+func TestUnTar(t *testing.T) {
+	// Setup: create temp dir with a file, tar it using ReTar, then UnTar into new dir
+	srcDir, err := os.MkdirTemp("", "untar-src")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(srcDir)
+
+	content := []byte("hello world")
+	if err := os.WriteFile(filepath.Join(srcDir, "file.txt"), content, 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	archiveName, err := ReTar(srcDir)
+	if err != nil {
+		t.Fatalf("ReTar failed: %v", err)
+	}
+	defer os.Remove(archiveName)
+
+	// Extract using UnTar with empty destination (auto-generated)
+	destDir, err := UnTar(archiveName, "")
+	if err != nil {
+		t.Fatalf("UnTar failed: %v", err)
+	}
+	defer os.RemoveAll(destDir)
+
+	extractedContent, err := os.ReadFile(filepath.Join(destDir, "file.txt"))
+	if err != nil {
+		t.Fatalf("failed to read extracted file: %v", err)
+	}
+	if !bytes.Equal(content, extractedContent) {
+		t.Fatalf("extracted content mismatch")
+	}
+}
+
+func TestUnTarErrors(t *testing.T) {
+	// Non-existent archive
+	if _, err := UnTar("does-not-exist.tar.gz", ""); err == nil {
+		t.Fatalf("expected error for non-existent archive")
+	}
+
+	// Empty archive path
+	if _, err := UnTar("", ""); err == nil {
+		t.Fatalf("expected error for empty archive path")
+	}
+}

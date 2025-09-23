@@ -6,6 +6,7 @@ package cmd
 import (
 	"log"
 	"os"
+	"strings"
 
 	"github.com/mona-actions/gh-commit-remap/internal/archive"
 	"github.com/mona-actions/gh-commit-remap/internal/commitremap"
@@ -38,18 +39,36 @@ var rootCmd = &cobra.Command{
 
 		archivePath, _ := cmd.Flags().GetString("migration-archive")
 
-		err = commitremap.ProcessFiles(archivePath, types, commitMap)
-		if err != nil {
-			log.Fatal(err)
+		var extractedDir string
+		untarAndRetar := strings.HasSuffix(archivePath, ".tar.gz")
+
+		if untarAndRetar {
+			// Extract the provided migration archive so we can modify its JSON contents
+			extractedDir, err = archive.UnTar(archivePath, "")
+			if err != nil {
+				log.Fatalf("Error extracting migration archive: %v", err)
+			}
+		} else {
+			// Treat provided path as an already-extracted directory
+			extractedDir = archivePath
 		}
 
-		tarPath, err := archive.ReTar(archivePath)
-		if err != nil {
+		if err := commitremap.ProcessFiles(extractedDir, types, commitMap); err != nil {
 			log.Fatal(err)
+		} else {
+			// Re-package the modified directory into a new archive
+			tarPath, err := archive.ReTar(extractedDir)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Printf("New archive created: %s", tarPath)
+			if untarAndRetar {
+				// Cleanup extracted directory after successful re-tar
+				if err := os.RemoveAll(extractedDir); err != nil {
+					log.Printf("Warning: failed to remove extracted directory %s: %v", extractedDir, err)
+				}
+			}
 		}
-
-		log.Printf("New archive created: %s", tarPath)
-
 	},
 }
 
