@@ -27,7 +27,7 @@ Usage:
 Flags:
   -h, --help                       help for gh-commit-remap
   -c, --mapping-file string        Path to the commit map file Example: /path/to/commit-map
-  -m, --migration-archive string   Path to the migration archive Example: /path/to/migration-archive.tar.gz
+  -m, --migration-archive string   Path to the migration archive Example: /path/to/migration-archive or /path/to/migration-archive.tar.gz
 ```
 
 The mapping file should be in the format produced by [git-filter-repo](https://github.com/newren/git-filter-repo). For example:
@@ -38,4 +38,4 @@ old                                      new
 ...
 ```
 
-This tool will produce a new migration archive in the current directory, appending `-REMAPPED` to the base filename of the original migration archive. 
+You can provide a directory where your migration archive has been expanded, or a `.tar.gz` file, via the `--migration-archive` argument. In either case, this tool will produce a new migration archive in the current directory, appending `-REMAPPED` to the base filename of the original migration archive. 
