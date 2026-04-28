@@ -1,6 +1,6 @@
 module github.com/mona-actions/gh-commit-remap
 
-go 1.24
+go 1.25
 
 require github.com/spf13/cobra v1.8.1
 
