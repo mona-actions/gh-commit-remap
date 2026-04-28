@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mona-actions/gh-commit-remap/internal/archive"
-	"github.com/mona-actions/gh-commit-remap/internal/commitremap"
+	"github.com/mona-actions/gh-commit-remap/pkg/archive"
+	"github.com/mona-actions/gh-commit-remap/pkg/commitremap"
 	"github.com/spf13/cobra"
 )
 
@@ -34,9 +34,6 @@ var rootCmd = &cobra.Command{
 			log.Fatalf("Error parsing commit map: %v", err)
 		}
 
-		// config to define the types of files to process
-		types := []string{"pull_requests", "issues", "issue_events"}
-
 		archivePath, _ := cmd.Flags().GetString("migration-archive")
 
 		var extractedDir string
@@ -53,7 +50,7 @@ var rootCmd = &cobra.Command{
 			extractedDir = archivePath
 		}
 
-		if err := commitremap.ProcessFiles(extractedDir, types, commitMap); err != nil {
+		if err := commitremap.ProcessFiles(extractedDir, commitremap.DefaultPrefixes(), commitMap); err != nil {
 			log.Fatal(err)
 		} else {
 			// Re-package the modified directory into a new archive
