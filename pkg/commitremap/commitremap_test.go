@@ -166,16 +166,38 @@ func TestProcessFiles(t *testing.T) {
 			},
 		}
 
+		paths := make(map[string]string, len(fixtures))
 		for name, fixture := range fixtures {
-			writeFile(t, filepath.Join(dir, name), fixture.input)
+			p := filepath.Join(dir, name)
+			paths[name] = p
+			writeFile(t, p, fixture.input)
 		}
 
-		if err := ProcessFiles(dir, DefaultPrefixes(), commitMap); err != nil {
+		stats, err := ProcessFiles(dir, DefaultPrefixes(), commitMap)
+		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
 		for name, fixture := range fixtures {
 			assertJSONFileEqual(t, filepath.Join(dir, name), fixture.want)
+		}
+
+		if got, want := stats.FilesScanned, 3; got != want {
+			t.Fatalf("FilesScanned = %d, want %d", got, want)
+		}
+		if got, want := stats.FilesChanged(), 3; got != want {
+			t.Fatalf("FilesChanged() = %d, want %d", got, want)
+		}
+		// pull_requests: sha=oldSHA1, nested[0].head=oldSHA2 -> 2
+		// issues: events[0].commit_id=oldSHA2 -> 1
+		// issue_events: payload.before=oldSHA3, payload.after=oldSHA1 -> 2
+		if got, want := stats.TotalReplacements(), 5; got != want {
+			t.Fatalf("TotalReplacements() = %d, want %d", got, want)
+		}
+		for name := range fixtures {
+			if n := stats.PerFile[paths[name]]; n <= 0 {
+				t.Fatalf("stats.PerFile[%s] = %d, want > 0", paths[name], n)
+			}
 		}
 	})
 
@@ -185,7 +207,7 @@ func TestProcessFiles(t *testing.T) {
 		want := `{"sha":"oldSHA1","nested":[{"sha":"oldSHA2"}]}`
 		writeFile(t, filePath, want)
 
-		if err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{}); err != nil {
+		if _, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{}); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
@@ -193,7 +215,7 @@ func TestProcessFiles(t *testing.T) {
 	})
 
 	t.Run("no matching files", func(t *testing.T) {
-		if err := ProcessFiles(t.TempDir(), DefaultPrefixes(), map[string]string{"oldSHA1": "newSHA1"}); err != nil {
+		if _, err := ProcessFiles(t.TempDir(), DefaultPrefixes(), map[string]string{"oldSHA1": "newSHA1"}); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 	})
@@ -205,12 +227,23 @@ func TestProcessFiles(t *testing.T) {
 		writeFile(t, fooPath, `{"sha":"oldSHA1"}`)
 		writeFile(t, pullPath, `{"sha":"oldSHA1"}`)
 
-		if err := ProcessFiles(dir, []string{"foo"}, map[string]string{"oldSHA1": "newSHA1"}); err != nil {
+		stats, err := ProcessFiles(dir, []string{"foo"}, map[string]string{"oldSHA1": "newSHA1"})
+		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
 		assertJSONFileEqual(t, fooPath, `{"sha":"newSHA1"}`)
 		assertJSONFileEqual(t, pullPath, `{"sha":"oldSHA1"}`)
+
+		if got, want := len(stats.PerFile), 1; got != want {
+			t.Fatalf("len(stats.PerFile) = %d, want %d", got, want)
+		}
+		if n, ok := stats.PerFile[fooPath]; !ok || n <= 0 {
+			t.Fatalf("stats.PerFile[fooPath] = %d, ok=%v; want >0 entry", n, ok)
+		}
+		if _, ok := stats.PerFile[pullPath]; ok {
+			t.Fatalf("stats.PerFile must not contain pullPath")
+		}
 	})
 
 	t.Run("single-pass behavior remaps all keys", func(t *testing.T) {
@@ -224,7 +257,7 @@ func TestProcessFiles(t *testing.T) {
 			"oldSHA3": "newSHA3",
 			"oldSHA4": "newSHA4",
 		}
-		if err := ProcessFiles(dir, []string{"pull_requests"}, commitMap); err != nil {
+		if _, err := ProcessFiles(dir, []string{"pull_requests"}, commitMap); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
@@ -237,7 +270,7 @@ func TestProcessFiles(t *testing.T) {
 		original := `{"title":"no SHA here","body":"https://example.invalid/oldSHA1","labels":["bug","help wanted"]}`
 		writeFile(t, filePath, original)
 
-		if err := ProcessFiles(dir, []string{"issues"}, map[string]string{"oldSHA1": "newSHA1"}); err != nil {
+		if _, err := ProcessFiles(dir, []string{"issues"}, map[string]string{"oldSHA1": "newSHA1"}); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
@@ -257,6 +290,91 @@ func TestDefaultPrefixes(t *testing.T) {
 	fresh := DefaultPrefixes()
 	if !reflect.DeepEqual(fresh, want) {
 		t.Fatalf("DefaultPrefixes() returned shared state; got %#v after caller mutation", fresh)
+	}
+}
+
+func TestProcessFiles_SkipsWriteWhenNoReplacements(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "pull_requests_000001.json")
+	original := []byte(`{"sha":"someSHA","nested":[{"sha":"otherSHA"}]}`)
+	if err := os.WriteFile(filePath, original, 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	infoBefore, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("stat before: %v", err)
+	}
+
+	stats, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{"unrelated": "x"})
+	if err != nil {
+		t.Fatalf("ProcessFiles returned error: %v", err)
+	}
+
+	got, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !reflect.DeepEqual(got, original) {
+		t.Fatalf("file bytes changed; got %q, want %q", got, original)
+	}
+
+	infoAfter, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if !infoAfter.ModTime().Equal(infoBefore.ModTime()) {
+		t.Fatalf("mtime changed: before=%v after=%v", infoBefore.ModTime(), infoAfter.ModTime())
+	}
+
+	if stats.FilesScanned != 1 {
+		t.Fatalf("FilesScanned = %d, want 1", stats.FilesScanned)
+	}
+	if stats.FilesChanged() != 0 {
+		t.Fatalf("FilesChanged() = %d, want 0", stats.FilesChanged())
+	}
+	if len(stats.PerFile) != 0 {
+		t.Fatalf("len(PerFile) = %d, want 0", len(stats.PerFile))
+	}
+}
+
+func TestProcessFiles_ReturnsPartialStatsOnError(t *testing.T) {
+	dir := t.TempDir()
+	// filepath.Glob returns sorted results, so pull_requests_000001.json is processed before pull_requests_000002.json.
+	validPath := filepath.Join(dir, "pull_requests_000001.json")
+	badPath := filepath.Join(dir, "pull_requests_000002.json")
+	writeFile(t, validPath, `{"sha":"oldSHA1"}`)
+	writeFile(t, badPath, `{not valid json`)
+
+	stats, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{"oldSHA1": "newSHA1"})
+	if err == nil {
+		t.Fatal("expected error from malformed JSON file")
+	}
+	if stats.FilesScanned != 2 {
+		t.Fatalf("FilesScanned = %d, want 2", stats.FilesScanned)
+	}
+	if len(stats.PerFile) < 1 {
+		t.Fatalf("len(PerFile) = %d, want >= 1", len(stats.PerFile))
+	}
+	if _, ok := stats.PerFile[validPath]; !ok {
+		t.Fatalf("PerFile must contain validPath %q; got %#v", validPath, stats.PerFile)
+	}
+}
+
+func TestStats_HelperMethods(t *testing.T) {
+	s := Stats{FilesScanned: 5, PerFile: map[string]int{"a": 2, "b": 3}}
+	if got, want := s.FilesChanged(), 2; got != want {
+		t.Fatalf("FilesChanged() = %d, want %d", got, want)
+	}
+	if got, want := s.TotalReplacements(), 5; got != want {
+		t.Fatalf("TotalReplacements() = %d, want %d", got, want)
+	}
+
+	var zero Stats
+	if got := zero.FilesChanged(); got != 0 {
+		t.Fatalf("zero.FilesChanged() = %d, want 0", got)
+	}
+	if got := zero.TotalReplacements(); got != 0 {
+		t.Fatalf("zero.TotalReplacements() = %d, want 0", got)
 	}
 }
 
