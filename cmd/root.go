@@ -6,6 +6,7 @@ package cmd
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mona-actions/gh-commit-remap/pkg/archive"
@@ -53,9 +54,11 @@ var rootCmd = &cobra.Command{
 		if err := commitremap.ProcessFiles(extractedDir, commitremap.DefaultPrefixes(), commitMap); err != nil {
 			log.Fatal(err)
 		} else {
-			// Re-package the modified directory into a new archive
-			tarPath, err := archive.ReTar(extractedDir)
-			if err != nil {
+			// Re-package the modified directory into a new archive in the
+			// current working directory using the legacy "<basename>-REMAPPED.tar.gz"
+			// naming convention.
+			tarPath := filepath.Base(extractedDir) + "-REMAPPED.tar.gz"
+			if err := archive.ReTarDir(extractedDir, tarPath); err != nil {
 				log.Fatal(err)
 			}
 			log.Printf("New archive created: %s", tarPath)

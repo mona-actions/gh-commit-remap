@@ -90,4 +90,4 @@ func main() {
   (`commit_comments_*.json`, `pull_request_review*_*.json`,
   `releases_*.json`'s `target_commitish`, etc.) are not processed by default.
   Pass a custom `prefixes` slice to `ProcessFiles` to widen coverage, or
-  track the follow-up issue for a default-list expansion. 
+  track the follow-up issue for a default-list expansion.

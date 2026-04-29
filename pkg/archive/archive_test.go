@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -86,7 +87,7 @@ func collectListing(t *testing.T, root string) []string {
 	return entries
 }
 
-func TestReTar(t *testing.T) {
+func TestReTarDir_BasicRoundTrip(t *testing.T) {
 	srcDir := t.TempDir()
 
 	origContent := []byte("test")
@@ -94,11 +95,10 @@ func TestReTar(t *testing.T) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	tarFile, err := ReTar(srcDir)
-	if err != nil {
-		t.Fatalf("ReTar failed: %v", err)
+	tarFile := filepath.Join(t.TempDir(), "out.tar.gz")
+	if err := ReTarDir(srcDir, tarFile); err != nil {
+		t.Fatalf("ReTarDir failed: %v", err)
 	}
-	defer os.Remove(tarFile)
 
 	if _, err := os.Stat(tarFile); err != nil {
 		t.Fatalf("tar file was not created: %v", err)
@@ -127,11 +127,10 @@ func TestUnTar(t *testing.T) {
 		t.Fatalf("failed to write file: %v", err)
 	}
 
-	archiveName, err := ReTar(srcDir)
-	if err != nil {
-		t.Fatalf("ReTar failed: %v", err)
+	archiveName := filepath.Join(t.TempDir(), "out.tar.gz")
+	if err := ReTarDir(srcDir, archiveName); err != nil {
+		t.Fatalf("ReTarDir failed: %v", err)
 	}
-	defer os.Remove(archiveName)
 
 	destDir, err := UnTar(archiveName, "")
 	if err != nil {
@@ -536,37 +535,121 @@ func TestReTarDir_Overwrites(t *testing.T) {
 	}
 }
 
-func TestReTar_LegacyNamingInCWD(t *testing.T) {
-	cwd := t.TempDir()
-	oldCWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get current directory: %v", err)
+func TestReTarDir_RemovesPartialArchiveOnError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based unreadable-dir setup is unreliable on Windows")
 	}
-	if err := os.Chdir(cwd); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(oldCWD); err != nil {
-			t.Fatalf("failed to restore current directory: %v", err)
-		}
-	})
-	srcDir := filepath.Join(t.TempDir(), "source-dir")
-	if err := os.Mkdir(srcDir, 0o755); err != nil {
-		t.Fatalf("failed to create source dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("content"), 0o644); err != nil {
-		t.Fatalf("failed to write source file: %v", err)
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses chmod restrictions")
 	}
 
-	archiveName, err := ReTar(srcDir)
-	if err != nil {
-		t.Fatalf("ReTar failed: %v", err)
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "ok.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatalf("failed to write ok file: %v", err)
 	}
-	wantName := filepath.Base(srcDir) + "-REMAPPED.tar.gz"
-	if archiveName != wantName {
-		t.Fatalf("expected archive name %q, got %q", wantName, archiveName)
+	badDir := filepath.Join(srcDir, "unreadable")
+	if err := os.Mkdir(badDir, 0o755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, wantName)); err != nil {
-		t.Fatalf("expected archive in cwd: %v", err)
+	if err := os.WriteFile(filepath.Join(badDir, "child.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("failed to write child file: %v", err)
+	}
+	if err := os.Chmod(badDir, 0); err != nil {
+		t.Fatalf("failed to chmod 0 subdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(badDir, 0o755) })
+
+	outPath := filepath.Join(t.TempDir(), "archive.tar.gz")
+	err := ReTarDir(srcDir, outPath)
+	if err == nil {
+		t.Fatalf("expected ReTarDir to fail on unreadable subdir, got nil")
+	}
+	if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected partial archive removed, stat err=%v", statErr)
+	}
+}
+
+func TestReTarDir_RejectsSymlink(t *testing.T) {
+	// This is the only test exercising C3's special-file rejection path
+	// (TestUnTar_ReTarDir_RoundTrip uses a regular-file/dir-only fixture).
+	// Windows is intentionally uncovered here because os.Symlink there
+	// requires elevated privileges; the rejection logic itself is
+	// platform-agnostic.
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
+
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "real.txt"), []byte("real"), 0o644); err != nil {
+		t.Fatalf("failed to write real file: %v", err)
+	}
+	if err := os.Symlink("real.txt", filepath.Join(srcDir, "link.txt")); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	outPath := filepath.Join(t.TempDir(), "archive.tar.gz")
+	err := ReTarDir(srcDir, outPath)
+	if err == nil || !strings.Contains(err.Error(), "unsupported file type") {
+		t.Fatalf("expected unsupported-file-type error, got %v", err)
+	}
+	if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected partial archive removed, stat err=%v", statErr)
+	}
+}
+
+func TestUnTar_ReTarDir_RoundTrip(t *testing.T) {
+	// Start from a deterministic in-test fixture, run the full
+	// UnTar -> ReTarDir -> UnTar loop, and assert the file tree and
+	// byte contents survive the round trip. This is the symmetry
+	// tripwire between the two functions: any future drift (a tar type
+	// one side accepts but the other doesn't) trips this test.
+	headers := []tar.Header{
+		{Name: "top.txt", Mode: 0o644},
+		{Name: "nested/", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "nested/inner.txt", Mode: 0o644},
+		{Name: "nested/deep/", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "nested/deep/leaf.txt", Mode: 0o644},
+	}
+	contents := map[string][]byte{
+		"top.txt":              []byte("top-level content"),
+		"nested/inner.txt":     []byte("inner content"),
+		"nested/deep/leaf.txt": []byte("leaf content"),
+	}
+	archiveBytes := buildTarGz(t, headers, contents)
+	srcArchive := filepath.Join(t.TempDir(), "src.tar.gz")
+	if err := os.WriteFile(srcArchive, archiveBytes, 0o644); err != nil {
+		t.Fatalf("failed to write source archive: %v", err)
+	}
+
+	firstExtract := filepath.Join(t.TempDir(), "first")
+	if _, err := UnTar(srcArchive, firstExtract); err != nil {
+		t.Fatalf("first UnTar failed: %v", err)
+	}
+
+	repacked := filepath.Join(t.TempDir(), "repacked.tar.gz")
+	if err := ReTarDir(firstExtract, repacked); err != nil {
+		t.Fatalf("ReTarDir failed: %v", err)
+	}
+
+	secondExtract := filepath.Join(t.TempDir(), "second")
+	if _, err := UnTar(repacked, secondExtract); err != nil {
+		t.Fatalf("second UnTar failed: %v", err)
+	}
+
+	wantListing := []string{"nested/", "nested/deep/", "nested/deep/leaf.txt", "nested/inner.txt", "top.txt"}
+	gotListing := collectListing(t, secondExtract)
+	sort.Strings(gotListing)
+	sort.Strings(wantListing)
+	if !reflect.DeepEqual(gotListing, wantListing) {
+		t.Fatalf("round-trip listing mismatch: got %v, want %v", gotListing, wantListing)
+	}
+	for rel, want := range contents {
+		got, err := os.ReadFile(filepath.Join(secondExtract, rel))
+		if err != nil {
+			t.Fatalf("failed to read round-tripped %q: %v", rel, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("content mismatch for %q after round trip: got %q want %q", rel, got, want)
+		}
 	}
 }

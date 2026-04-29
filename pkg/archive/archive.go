@@ -11,18 +11,7 @@ import (
 	"strings"
 )
 
-// UnTar decompresses a .tar.gz file into destDir, returning the directory
-// containing the extracted contents. If destDir is empty, a directory named
-// after the archive (with .tar.gz or .tgz stripped) is created in the current
-// working directory — note that this default-naming behavior is asymmetric
-// with ReTarDir, which always requires an explicit outPath. destDir is
-// created if it does not exist, and empty, ".", and relative destination paths
-// are accepted. Extraction is sandboxed with os.Root: a destination path that
-// is itself a symlink is allowed as the sandbox root, but pre-existing symlinks
-// inside the destination tree are rejected as security boundary violations.
-// UnTar returns an error if the archive cannot be opened, is not valid gzip/tar
-// data, contains entries that escape destDir or use absolute paths, or contains
-// unsupported entry types such as symlinks, devices, FIFOs, or hard links.
+// UnTar decompresses a .tar.gz file into destDir, returning the directory containing the extracted contents.
 func UnTar(archiveFile, destDir string) (string, error) {
 	if archiveFile == "" {
 		return "", fmt.Errorf("archive file path is empty")
@@ -127,22 +116,7 @@ func pathHasParentRef(name string) bool {
 }
 
 // ReTarDir creates a .tar.gz archive at outPath from the contents of srcDir.
-// The parent directory for outPath is created if it does not exist, and an
-// existing outPath is overwritten. outPath must not resolve inside srcDir; an
-// error is returned otherwise.
-//
-// Archive entries use a "./" prefix and a top-level "./" directory entry to
-// match the byte-layout of the legacy `tar -czf {archive} -C {srcDir} .` shell
-// command. This parity exists so consumers that compare archives byte-for-byte
-// (e.g. CI pipelines diffing against archives produced by the previous
-// shell-based implementation, or downstream importers like the GEI migration
-// importer that historically consumed shell-tar output) keep working without
-// modification. Standards-compliant tar readers treat "./foo" and "foo"
-// identically; the prefix is purely about layout parity, not semantics.
-//
-// ReTarDir returns an error if srcDir cannot be read, is not a directory,
-// outPath cannot be created, or any file cannot be written to the archive.
-func ReTarDir(srcDir, outPath string) error {
+func ReTarDir(srcDir, outPath string) (retErr error) {
 	info, err := os.Stat(srcDir)
 	if err != nil {
 		return fmt.Errorf("cannot stat source directory: %w", err)
@@ -173,15 +147,26 @@ func ReTarDir(srcDir, outPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create archive: %w", err)
 	}
-	defer func() { _ = outFile.Close() }()
-
 	gzipWriter := gzip.NewWriter(outFile)
 	tarWriter := tar.NewWriter(gzipWriter)
 
-	// Match legacy `tar -czf -C srcDir .` layout: emit a top-level "./" directory
-	// entry. We reuse tar.FileInfoHeader (same path used for child entries) so the
-	// root header is populated consistently (Uid/Gid/AccessTime/Format etc.) rather
-	// than being a hand-rolled subset.
+	// The success path closes each writer explicitly (in tar -> gzip -> file order)
+	var tarClosed, gzipClosed, fileClosed bool
+	defer func() {
+		if !tarClosed {
+			_ = tarWriter.Close()
+		}
+		if !gzipClosed {
+			_ = gzipWriter.Close()
+		}
+		if !fileClosed {
+			_ = outFile.Close()
+		}
+		if retErr != nil {
+			_ = os.Remove(outPath)
+		}
+	}()
+
 	rootHeader, err := tar.FileInfoHeader(info, "")
 	if err != nil {
 		return fmt.Errorf("failed to create root tar header: %w", err)
@@ -198,10 +183,7 @@ func ReTarDir(srcDir, outPath string) error {
 		if path == srcDir {
 			return nil
 		}
-		// outPath is guaranteed to be outside srcDir by the up-front guard above,
-		// so filepath.WalkDir(srcDir, …) cannot yield it. The guard plus
-		// TestReTarDir_OutputInsideSrcDir / TestReTarDir_OutputEqualsSrcDir are the
-		// regression tripwire — no in-walk skip needed.
+		// Skip the output archive file if it somehow appears in the walk (defensive; guarded above).
 
 		info, err := entry.Info()
 		if err != nil {
@@ -213,6 +195,11 @@ func ReTarDir(srcDir, outPath string) error {
 			return fmt.Errorf("failed to calculate archive path for %q: %w", path, err)
 		}
 		tarPath := filepath.ToSlash(relPath)
+
+		// Reject special files (symlinks, devices, FIFOs, sockets)
+		if !info.IsDir() && !info.Mode().IsRegular() {
+			return fmt.Errorf("unsupported file type for %q: only regular files and directories are archivable", path)
+		}
 
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
@@ -252,26 +239,15 @@ func ReTarDir(srcDir, outPath string) error {
 	if err := tarWriter.Close(); err != nil {
 		return fmt.Errorf("failed to close tar writer: %w", err)
 	}
+	tarClosed = true
 	if err := gzipWriter.Close(); err != nil {
 		return fmt.Errorf("failed to close gzip writer: %w", err)
 	}
+	gzipClosed = true
 	if err := outFile.Close(); err != nil {
 		return fmt.Errorf("failed to close archive: %w", err)
 	}
+	fileClosed = true
 
 	return nil
-}
-
-// ReTar preserves the legacy CLI behavior by writing
-// <basename(srcDir)>-REMAPPED.tar.gz into the current working directory and
-// returning that archive name. It returns an error if ReTarDir cannot create
-// the archive.
-//
-// Deprecated: prefer ReTarDir. Will be removed in a future major version.
-func ReTar(srcDir string) (string, error) {
-	archiveName := filepath.Base(srcDir) + "-REMAPPED.tar.gz"
-	if err := ReTarDir(srcDir, archiveName); err != nil {
-		return "", fmt.Errorf("error re-tarring the files: %w", err)
-	}
-	return archiveName, nil
 }
