@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 // DefaultPrefixes returns the set of archive metadata file prefixes that
@@ -61,29 +63,67 @@ func ParseCommitMap(filePath string) (map[string]string, error) {
 // Each file is walked once, replacing string values that exactly match a key in
 // commitMap. Only whole-string SHA values are replaced. SHAs embedded in URLs,
 // markdown, or composite strings are not rewritten.
-func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]string) (Stats, error) {
+//
+// numWorkers controls how many goroutines process files in parallel.
+// If numWorkers <= 0, it defaults to runtime.NumCPU().
+func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]string, numWorkers int) (Stats, error) {
 	stats := Stats{PerFile: make(map[string]int)}
 
+	if numWorkers <= 0 {
+		numWorkers = runtime.NumCPU()
+	}
+
+	// Collect all files to process
+	var allFiles []string
 	for _, prefix := range prefixes {
 		pattern := filepath.Join(archiveDir, prefix+"_*.json")
 		files, err := filepath.Glob(pattern)
 		if err != nil {
 			return stats, fmt.Errorf("globbing %s: %w", pattern, err)
 		}
+		allFiles = append(allFiles, files...)
+	}
 
-		for _, file := range files {
-			stats.FilesScanned++
-			n, err := updateMetadataFile(file, commitMap)
-			if err != nil {
-				return stats, fmt.Errorf("updating metadata file %s: %w", file, err)
+	stats.FilesScanned = len(allFiles)
+
+	type fileResult struct {
+		file  string
+		count int
+		err   error
+	}
+
+	results := make([]fileResult, len(allFiles))
+	workCh := make(chan int, len(allFiles))
+	for i := range allFiles {
+		workCh <- i
+	}
+	close(workCh)
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range workCh {
+				n, err := updateMetadataFile(allFiles[idx], commitMap)
+				results[idx] = fileResult{file: allFiles[idx], count: n, err: err}
 			}
-			if n > 0 {
-				stats.PerFile[file] = n
-			}
+		}()
+	}
+	wg.Wait()
+
+	// Merge results in order, returning partial stats on first error
+	var firstErr error
+	for _, res := range results {
+		if res.count > 0 {
+			stats.PerFile[res.file] = res.count
+		}
+		if res.err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("updating metadata file %s: %w", res.file, res.err)
 		}
 	}
 
-	return stats, nil
+	return stats, firstErr
 }
 
 func updateMetadataFile(filePath string, commitMap map[string]string) (int, error) {

@@ -23,6 +23,8 @@ func init() {
 	rootCmd.Flags().StringP("migration-archive", "m", "", "Path to the migration archive Example: /path/to/migration-archive.tar.gz")
 	rootCmd.MarkFlagRequired("migration-archive")
 
+	rootCmd.Flags().IntP("threads", "t", 0, "Number of parallel goroutines for metadata processing (default: number of CPUs)")
+
 	rootCmd.SilenceErrors = true
 	rootCmd.SilenceUsage = true
 }
@@ -94,7 +96,8 @@ var rootCmd = &cobra.Command{
 
 		pterm.DefaultSection.Println("Remap")
 		remapSpinner, _ := pterm.DefaultSpinner.Start("Remapping SHAs...")
-		stats, err := commitremap.ProcessFiles(extractedDir, commitremap.DefaultPrefixes(), commitMap)
+		threads, _ := cmd.Flags().GetInt("threads")
+		stats, err := commitremap.ProcessFiles(extractedDir, commitremap.DefaultPrefixes(), commitMap, threads)
 		if err != nil {
 			remapSpinner.Fail("Remap failed")
 			renderSummaryTable(stats, extractedDir)

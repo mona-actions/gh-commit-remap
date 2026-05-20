@@ -173,7 +173,7 @@ func TestProcessFiles(t *testing.T) {
 			writeFile(t, p, fixture.input)
 		}
 
-		stats, err := ProcessFiles(dir, DefaultPrefixes(), commitMap)
+		stats, err := ProcessFiles(dir, DefaultPrefixes(), commitMap, 0)
 		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
@@ -207,7 +207,7 @@ func TestProcessFiles(t *testing.T) {
 		want := `{"sha":"oldSHA1","nested":[{"sha":"oldSHA2"}]}`
 		writeFile(t, filePath, want)
 
-		if _, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{}); err != nil {
+		if _, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{}, 0); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
@@ -215,7 +215,7 @@ func TestProcessFiles(t *testing.T) {
 	})
 
 	t.Run("no matching files", func(t *testing.T) {
-		if _, err := ProcessFiles(t.TempDir(), DefaultPrefixes(), map[string]string{"oldSHA1": "newSHA1"}); err != nil {
+		if _, err := ProcessFiles(t.TempDir(), DefaultPrefixes(), map[string]string{"oldSHA1": "newSHA1"}, 0); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 	})
@@ -227,7 +227,7 @@ func TestProcessFiles(t *testing.T) {
 		writeFile(t, fooPath, `{"sha":"oldSHA1"}`)
 		writeFile(t, pullPath, `{"sha":"oldSHA1"}`)
 
-		stats, err := ProcessFiles(dir, []string{"foo"}, map[string]string{"oldSHA1": "newSHA1"})
+		stats, err := ProcessFiles(dir, []string{"foo"}, map[string]string{"oldSHA1": "newSHA1"}, 0)
 		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
@@ -257,7 +257,7 @@ func TestProcessFiles(t *testing.T) {
 			"oldSHA3": "newSHA3",
 			"oldSHA4": "newSHA4",
 		}
-		if _, err := ProcessFiles(dir, []string{"pull_requests"}, commitMap); err != nil {
+		if _, err := ProcessFiles(dir, []string{"pull_requests"}, commitMap, 0); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
@@ -270,7 +270,7 @@ func TestProcessFiles(t *testing.T) {
 		original := `{"title":"no SHA here","body":"https://example.invalid/oldSHA1","labels":["bug","help wanted"]}`
 		writeFile(t, filePath, original)
 
-		if _, err := ProcessFiles(dir, []string{"issues"}, map[string]string{"oldSHA1": "newSHA1"}); err != nil {
+		if _, err := ProcessFiles(dir, []string{"issues"}, map[string]string{"oldSHA1": "newSHA1"}, 0); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
@@ -305,7 +305,7 @@ func TestProcessFiles_SkipsWriteWhenNoReplacements(t *testing.T) {
 		t.Fatalf("stat before: %v", err)
 	}
 
-	stats, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{"unrelated": "x"})
+	stats, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{"unrelated": "x"}, 0)
 	if err != nil {
 		t.Fatalf("ProcessFiles returned error: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestProcessFiles_ReturnsPartialStatsOnError(t *testing.T) {
 	writeFile(t, validPath, `{"sha":"oldSHA1"}`)
 	writeFile(t, badPath, `{not valid json`)
 
-	stats, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{"oldSHA1": "newSHA1"})
+	stats, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{"oldSHA1": "newSHA1"}, 0)
 	if err == nil {
 		t.Fatal("expected error from malformed JSON file")
 	}
