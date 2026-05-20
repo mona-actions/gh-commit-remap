@@ -2,7 +2,6 @@
 package commitremap
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,14 +59,19 @@ func ParseCommitMap(filePath string) (map[string]string, error) {
 
 // ProcessFiles rewrites SHAs in JSON metadata files matching <prefix>_*.json inside archiveDir.
 //
-// Each file is walked once, replacing string values that exactly match a key in
-// commitMap. Only whole-string SHA values are replaced. SHAs embedded in URLs,
-// markdown, or composite strings are not rewritten.
+// Each file is scanned byte-by-byte using a sliding window that matches
+// SHA-length hex sequences against the commit map. SHAs are replaced
+// wherever they appear — including inside URLs, markdown, or composite strings.
 //
 // numWorkers controls how many goroutines process files in parallel.
 // If numWorkers <= 0, it defaults to runtime.NumCPU().
 func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]string, numWorkers int) (Stats, error) {
 	stats := Stats{PerFile: make(map[string]int)}
+
+	shaLen, err := commitMapSHALen(commitMap)
+	if err != nil {
+		return stats, fmt.Errorf("validating commit map: %w", err)
+	}
 
 	if numWorkers <= 0 {
 		numWorkers = runtime.NumCPU()
@@ -105,7 +109,7 @@ func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]str
 		go func() {
 			defer wg.Done()
 			for idx := range workCh {
-				n, err := updateMetadataFile(allFiles[idx], commitMap)
+				n, err := updateMetadataFile(allFiles[idx], commitMap, shaLen)
 				results[idx] = fileResult{file: allFiles[idx], count: n, err: err}
 			}
 		}()
@@ -126,29 +130,18 @@ func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]str
 	return stats, firstErr
 }
 
-func updateMetadataFile(filePath string, commitMap map[string]string) (int, error) {
+func updateMetadataFile(filePath string, commitMap map[string]string, shaLen int) (int, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return 0, fmt.Errorf("reading data: %w", err)
 	}
 
-	var dataMap interface{}
-	err = json.Unmarshal(data, &dataMap)
-	if err != nil {
-		return 0, fmt.Errorf("unmarshaling data: %w", err)
-	}
-
-	count := replaceSHA(dataMap, commitMap)
+	data, count := replaceSHABytes(data, commitMap, shaLen)
 	if count == 0 {
 		return 0, nil
 	}
 
-	updatedData, err := json.MarshalIndent(dataMap, "", "  ")
-	if err != nil {
-		return count, fmt.Errorf("marshaling updated data: %w", err)
-	}
-
-	err = os.WriteFile(filePath, updatedData, 0644)
+	err = os.WriteFile(filePath, data, 0644)
 	if err != nil {
 		return count, fmt.Errorf("writing updated data: %w", err)
 	}
@@ -156,37 +149,78 @@ func updateMetadataFile(filePath string, commitMap map[string]string) (int, erro
 	return count, nil
 }
 
-// replaceSHA walks data in place, rewriting whole-string values that match a
-// key in commitMap. It returns the number of replacements performed.
-func replaceSHA(data interface{}, commitMap map[string]string) int {
-	count := 0
-	switch v := data.(type) {
-	case map[string]interface{}:
-		for key, value := range v {
-			if str, ok := value.(string); ok {
-				if newSHA, hit := commitMap[str]; hit {
-					v[key] = newSHA
-					count++
-				}
-				continue
-			}
+// isHexByte reports whether b is a valid hexadecimal byte (0-9, a-f, A-F).
+func isHexByte(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
+}
 
-			count += replaceSHA(value, commitMap)
+// commitMapSHALen returns the SHA length common to every key in commitMap.
+// It returns an error if the map is empty or if keys/values have different lengths.
+func commitMapSHALen(commitMap map[string]string) (int, error) {
+	shaLen := 0
+	for old, new_ := range commitMap {
+		if shaLen == 0 {
+			shaLen = len(old)
+			if shaLen == 0 {
+				return 0, fmt.Errorf("commit map contains an empty key")
+			}
 		}
-	case []interface{}:
-		for i, value := range v {
-			if str, ok := value.(string); ok {
-				if newSHA, hit := commitMap[str]; hit {
-					v[i] = newSHA
-					count++
-				}
-				continue
-			}
-
-			count += replaceSHA(value, commitMap)
+		if len(old) != shaLen || len(new_) != shaLen {
+			return 0, fmt.Errorf("commit map SHAs have inconsistent lengths: expected %d, got key len %d / value len %d", shaLen, len(old), len(new_))
 		}
 	}
-	return count
+	if shaLen == 0 {
+		return 0, fmt.Errorf("commit map is empty")
+	}
+	return shaLen, nil
+}
+
+// replaceSHABytes scans data byte-by-byte using a sliding window of shaLen.
+//
+// Algorithm:
+//  1. Walk each byte, counting consecutive valid hex (SHA) bytes.
+//  2. When a non-hex byte is hit, reset the counter — no SHA can span it.
+//  3. Once we have shaLen consecutive hex bytes, extract that window and
+//     look it up in commitMap.
+//  4. On match: replace in-place, reset counter to 0. The next window
+//     starts fresh from the byte after the replacement.
+//  5. On no match: keep going. The counter grows past shaLen so the
+//     window slides forward by one byte each step, checking every
+//     overlapping shaLen-sized substring. For example with shaLen=40,
+//     if bytes 0–39 don't match, bytes 1–40 are checked next, etc.
+//
+// Returns the (potentially modified) byte slice and the replacement count.
+func replaceSHABytes(data []byte, commitMap map[string]string, shaLen int) ([]byte, int) {
+	count := 0
+	consecutiveHex := 0
+
+	for i := 0; i < len(data); i++ {
+		if isHexByte(data[i]) {
+			consecutiveHex++
+		} else {
+			// Non-hex byte breaks any potential SHA sequence.
+			consecutiveHex = 0
+			continue
+		}
+
+		// Once we have enough consecutive hex bytes, check if the last
+		// shaLen bytes match an entry in the commit map.
+		if consecutiveHex >= shaLen {
+			start := i - shaLen + 1
+			candidate := string(data[start : i+1])
+			if newSHA, ok := commitMap[candidate]; ok {
+				copy(data[start:i+1], newSHA)
+				count++
+				// Reset so the next window starts after the replacement,
+				// avoiding re-matching bytes we just wrote.
+				consecutiveHex = 0
+			}
+			// If no match, consecutiveHex keeps growing and the window
+			// slides forward on the next iteration.
+		}
+	}
+
+	return data, count
 }
 
 // summarize the work performed by a ProcessFiles call.
