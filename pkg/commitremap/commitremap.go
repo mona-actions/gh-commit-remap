@@ -40,7 +40,7 @@ func ParseCommitMap(filePath string) (map[string]string, error) {
 		return nil, fmt.Errorf("reading commit map %s: %w", filePath, err)
 	}
 
-	for _, line := range strings.Split(string(content), "\n") {
+	for i, line := range strings.Split(string(content), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -49,6 +49,11 @@ func ParseCommitMap(filePath string) (map[string]string, error) {
 		if len(fields) != 2 {
 			lineErr := invalidCommitMapLineError{line: strings.TrimRight(line, "\r"), fields: len(fields)}
 			return nil, fmt.Errorf("invalid commit map line: %w", lineErr)
+		}
+
+		// Skip the header line produced by git-filter-repo ("old new")
+		if i == 0 && fields[0] == "old" && fields[1] == "new" {
+			continue
 		}
 
 		commitMap[fields[0]] = fields[1]
@@ -149,9 +154,21 @@ func updateMetadataFile(filePath string, commitMap map[string]string, shaLen int
 	return count, nil
 }
 
+// hexTable is a branchless lookup table for valid hex bytes.
+// A single array index replaces the 6-comparison branch chain in isHexByte,
+// improving throughput in the per-byte hot loop.
+var hexTable [256]bool
+
+func init() {
+	for _, b := range []byte("0123456789abcdefABCDEF") {
+		hexTable[b] = true
+	}
+}
+
 // isHexByte reports whether b is a valid hexadecimal byte (0-9, a-f, A-F).
+// Uses a precomputed lookup table for branchless evaluation.
 func isHexByte(b byte) bool {
-	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
+	return hexTable[b]
 }
 
 // commitMapSHALen returns the SHA length common to every key in commitMap.
@@ -182,8 +199,9 @@ func commitMapSHALen(commitMap map[string]string) (int, error) {
 //  2. When a non-hex byte is hit, reset the counter — no SHA can span it.
 //  3. Once we have shaLen consecutive hex bytes, extract that window and
 //     look it up in commitMap.
-//  4. On match: replace in-place, reset counter to 0. The next window
-//     starts fresh from the byte after the replacement.
+//  4. On match: replace in-place, skip past the replaced bytes. The next
+//     window starts fresh from the byte after the replacement, avoiding
+//     re-scanning the bytes we just wrote.
 //  5. On no match: keep going. The counter grows past shaLen so the
 //     window slides forward by one byte each step, checking every
 //     overlapping shaLen-sized substring. For example with shaLen=40,
@@ -211,8 +229,12 @@ func replaceSHABytes(data []byte, commitMap map[string]string, shaLen int) ([]by
 			if newSHA, ok := commitMap[candidate]; ok {
 				copy(data[start:i+1], newSHA)
 				count++
-				// Reset so the next window starts after the replacement,
-				// avoiding re-matching bytes we just wrote.
+				// Skip past the replaced bytes. Since we just wrote shaLen
+				// bytes, the next possible SHA starts at i+1. Setting
+				// consecutiveHex to 0 means the loop will begin counting
+				// fresh from the next byte without re-scanning the
+				// replacement. The loop increment (i++) moves us to i+1
+				// automatically.
 				consecutiveHex = 0
 			}
 			// If no match, consecutiveHex keeps growing and the window

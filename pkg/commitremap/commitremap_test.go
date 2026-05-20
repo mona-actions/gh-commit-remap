@@ -91,6 +91,33 @@ func TestParseCommitMap(t *testing.T) {
 			content:     "oldSHA1 newSHA1\noldSHA2 newSHA2 extra\noldSHA3 newSHA3",
 			errContains: "oldSHA2 newSHA2 extra",
 		},
+		{
+			name: "skips git-filter-repo header line",
+			content: "old new\n" +
+				"abc123 def456\n" +
+				"ghi789 jkl012",
+			expected: map[string]string{
+				"abc123": "def456",
+				"ghi789": "jkl012",
+			},
+		},
+		{
+			name: "header with trailing CRLF",
+			content: "old new\r\n" +
+				"abc123 def456\r\n",
+			expected: map[string]string{
+				"abc123": "def456",
+			},
+		},
+		{
+			name: "old new as data when not on first line",
+			content: "abc123 def456\n" +
+				"old new",
+			expected: map[string]string{
+				"abc123": "def456",
+				"old":    "new",
+			},
+		},
 	}
 
 	for _, tt := range tests {
