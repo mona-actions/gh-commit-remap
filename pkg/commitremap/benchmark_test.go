@@ -94,7 +94,7 @@ func BenchmarkReplaceSHABytes(b *testing.B) {
 		{"large-map/small-json", 1_000_000, 50, 2},
 		{"large-map/medium-json", 1_000_000, 500, 3},
 		{"large-map/large-json", 1_000_000, 5000, 3},
-		{"snowflake-scale", 1_834_000, 1000, 4},
+		{"monorepo-scale", 1_834_000, 1000, 4},
 	}
 
 	for _, s := range sizes {

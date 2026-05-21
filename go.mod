@@ -3,6 +3,7 @@ module github.com/mona-actions/gh-commit-remap
 go 1.25
 
 require (
+	github.com/klauspost/pgzip v1.2.6
 	github.com/pterm/pterm v0.12.83
 	github.com/spf13/cobra v1.8.1
 )
@@ -15,6 +16,7 @@ require (
 	github.com/containerd/console v1.0.5 // indirect
 	github.com/gookit/color v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/lithammer/fuzzysearch v1.1.8 // indirect
 	github.com/mattn/go-runewidth v0.0.20 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
