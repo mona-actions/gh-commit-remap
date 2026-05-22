@@ -66,7 +66,7 @@ func ParseCommitMap(filePath string) (map[string]string, error) {
 //
 // Each file is scanned byte-by-byte using a sliding window that matches
 // SHA-length hex sequences against the commit map. SHAs are replaced
-// wherever they appear — including inside URLs, markdown, or composite strings.
+// wherever they appear — including inside URLs, markdown, etc.
 //
 // numWorkers controls how many goroutines process files in parallel.
 // If numWorkers <= 0, it defaults to runtime.NumCPU().
@@ -154,11 +154,9 @@ func updateMetadataFile(filePath string, commitMap map[string]string, shaLen int
 	return count, nil
 }
 
-// hexTable is a branchless lookup table for valid hex bytes.
-// A single array index replaces the 6-comparison branch chain in isHexByte,
-// improving throughput in the per-byte hot loop.
 var hexTable [256]bool
 
+// init initializes the hexTable with valid hexadecimal characters (valid sha1 and sha256 characters).
 func init() {
 	for _, b := range []byte("0123456789abcdefABCDEF") {
 		hexTable[b] = true
@@ -196,7 +194,7 @@ func commitMapSHALen(commitMap map[string]string) (int, error) {
 //
 // Algorithm:
 //  1. Walk each byte, counting consecutive valid hex (SHA) bytes.
-//  2. When a non-hex byte is hit, reset the counter — no SHA can span it.
+//  2. When a non-hex byte is hit, reset the counter, no SHA can span it.
 //  3. Once we have shaLen consecutive hex bytes, extract that window and
 //     look it up in commitMap.
 //  4. On match: replace in-place, skip past the replaced bytes. The next
@@ -229,12 +227,6 @@ func replaceSHABytes(data []byte, commitMap map[string]string, shaLen int) ([]by
 			if newSHA, ok := commitMap[candidate]; ok {
 				copy(data[start:i+1], newSHA)
 				count++
-				// Skip past the replaced bytes. Since we just wrote shaLen
-				// bytes, the next possible SHA starts at i+1. Setting
-				// consecutiveHex to 0 means the loop will begin counting
-				// fresh from the next byte without re-scanning the
-				// replacement. The loop increment (i++) moves us to i+1
-				// automatically.
 				consecutiveHex = 0
 			}
 			// If no match, consecutiveHex keeps growing and the window
