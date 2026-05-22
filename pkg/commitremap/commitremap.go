@@ -14,7 +14,16 @@ import (
 // gh-commit-remap rewrites by default. A fresh slice is returned on each
 // call so callers can mutate the result without affecting other callers.
 func DefaultPrefixes() []string {
-	return []string{"pull_requests", "issues", "issue_events"}
+	return []string{
+		"issues",
+		"issue_events",
+		"issue_comments",
+		"pull_requests",
+		"pull_request_reviews",
+		"pull_request_review_comments",
+		"pull_request_review_threads",
+		"commit_comments",
+	}
 }
 
 type invalidCommitMapLineError struct {
