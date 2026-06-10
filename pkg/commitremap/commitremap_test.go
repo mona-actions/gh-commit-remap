@@ -166,6 +166,28 @@ func TestParseCommitMap(t *testing.T) {
 	})
 }
 
+func TestShouldRemap(t *testing.T) {
+	prefixes := map[string]bool{"pull_requests": true, "issues": true}
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"./pull_requests_000001.json", true},
+		{"./issues_000002.json", true},
+		{"./users_000001.json", false},
+		{"./pull_requests.json", false},       // no _digits suffix
+		{"./pull_requests_abc.json", false},   // non-digit suffix
+		{"./subdir/pull_requests_1.json", true}, // nested
+		{"./readme.md", false},
+		{"pull_requests_1.json", true},
+	}
+	for _, tt := range tests {
+		if got := ShouldRemap(tt.name, prefixes); got != tt.want {
+			t.Errorf("ShouldRemap(%q) = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestIsHexByte(t *testing.T) {
 	valid := "0123456789abcdefABCDEF"
 	for _, b := range []byte(valid) {
@@ -206,7 +228,7 @@ func TestCommitMapSHALen(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := commitMapSHALen(tt.commitMap)
+			got, err := CommitMapSHALen(tt.commitMap)
 			if tt.errContains != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q", tt.errContains)
@@ -220,7 +242,7 @@ func TestCommitMapSHALen(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got != tt.wantLen {
-				t.Fatalf("commitMapSHALen = %d, want %d", got, tt.wantLen)
+				t.Fatalf("CommitMapSHALen = %d, want %d", got, tt.wantLen)
 			}
 		})
 	}
@@ -304,7 +326,7 @@ func TestReplaceSHABytes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := []byte(tt.input)
-			out, count := replaceSHABytes(data, tt.commitMap, tt.shaLen)
+			out, count := ReplaceSHABytes(data, tt.commitMap, tt.shaLen)
 			if string(out) != tt.wantOut {
 				t.Fatalf("output = %q, want %q", string(out), tt.wantOut)
 			}
@@ -351,7 +373,7 @@ func TestProcessFiles(t *testing.T) {
 			writeFile(t, p, fixture.input)
 		}
 
-		stats, err := ProcessFiles(dir, DefaultPrefixes(), testCommitMap, 0)
+		stats, err := ProcessFiles(dir, DefaultPrefixes(), testCommitMap, ProcessOptions{})
 		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
@@ -391,14 +413,14 @@ func TestProcessFiles(t *testing.T) {
 		want := `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nested":[{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`
 		writeFile(t, filePath, want)
 
-		_, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{}, 0)
+		_, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{}, ProcessOptions{})
 		if err == nil {
 			t.Fatal("expected error for empty commit map")
 		}
 	})
 
 	t.Run("no matching files", func(t *testing.T) {
-		_, err := ProcessFiles(t.TempDir(), DefaultPrefixes(), testCommitMap, 0)
+		_, err := ProcessFiles(t.TempDir(), DefaultPrefixes(), testCommitMap, ProcessOptions{})
 		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
@@ -411,7 +433,7 @@ func TestProcessFiles(t *testing.T) {
 		writeFile(t, fooPath, `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 		writeFile(t, pullPath, `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 
-		stats, err := ProcessFiles(dir, []string{"foo"}, testCommitMap, 0)
+		stats, err := ProcessFiles(dir, []string{"foo"}, testCommitMap, ProcessOptions{})
 		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
@@ -441,7 +463,7 @@ func TestProcessFiles(t *testing.T) {
 		filePath := filepath.Join(dir, "pull_requests_000001.json")
 		writeFile(t, filePath, `{"items":[{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"nested":{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","children":["cccccccccccccccccccccccccccccccccccccccc"]}}]}`)
 
-		if _, err := ProcessFiles(dir, []string{"pull_requests"}, testCommitMap, 0); err != nil {
+		if _, err := ProcessFiles(dir, []string{"pull_requests"}, testCommitMap, ProcessOptions{}); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
@@ -460,7 +482,7 @@ func TestProcessFiles(t *testing.T) {
 		input := `{"title":"no SHA here","body":"https://example.invalid/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","labels":["bug","help wanted"]}`
 		writeFile(t, filePath, input)
 
-		stats, err := ProcessFiles(dir, []string{"issues"}, testCommitMap, 0)
+		stats, err := ProcessFiles(dir, []string{"issues"}, testCommitMap, ProcessOptions{})
 		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
@@ -515,7 +537,7 @@ func TestProcessFiles_SkipsWriteWhenNoReplacements(t *testing.T) {
 	noMatchMap := map[string]string{
 		"ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00": "1100110011001100110011001100110011001100",
 	}
-	stats, err := ProcessFiles(dir, []string{"pull_requests"}, noMatchMap, 0)
+	stats, err := ProcessFiles(dir, []string{"pull_requests"}, noMatchMap, ProcessOptions{})
 	if err != nil {
 		t.Fatalf("ProcessFiles returned error: %v", err)
 	}

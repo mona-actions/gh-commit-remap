@@ -73,48 +73,42 @@ var rootCmd = &cobra.Command{
 
 		archivePath, _ := cmd.Flags().GetString("migration-archive")
 
-		var extractedDir string
-		untarAndRetar := strings.HasSuffix(archivePath, ".tar.gz")
-
-		if untarAndRetar {
-			pterm.DefaultSection.Println("Extract")
-			spinner, _ := pterm.DefaultSpinner.Start("Extracting archive...")
-			extractedDir, err = archive.UnTar(archivePath, "")
-			if err != nil {
-				spinner.Fail("Extraction failed")
-				return fmt.Errorf("extracting migration archive: %w", err)
-			}
-			defer func() {
-				if err := os.RemoveAll(extractedDir); err != nil {
-					pterm.Warning.Printfln("failed to remove extracted directory %s: %v", extractedDir, err)
-				}
-			}()
-			spinner.Success(fmt.Sprintf("Extracted to %s", extractedDir))
-		} else {
-			extractedDir = archivePath
-		}
-
 		pterm.DefaultSection.Println("Remap")
-		remapSpinner, _ := pterm.DefaultSpinner.Start("Remapping SHAs...")
-		threads, _ := cmd.Flags().GetInt("threads")
-		stats, err := commitremap.ProcessFiles(extractedDir, commitremap.DefaultPrefixes(), commitMap, threads)
-		if err != nil {
-			remapSpinner.Fail("Remap failed")
-			renderSummaryTable(stats, extractedDir)
-			return fmt.Errorf("remapping SHAs: %w", err)
-		}
-		remapSpinner.Success(fmt.Sprintf("Remapped %d SHAs across %d files (scanned %d)", stats.TotalReplacements(), stats.FilesChanged(), stats.FilesScanned))
-		renderSummaryTable(stats, extractedDir)
+		spinner, _ := pterm.DefaultSpinner.Start("Remapping SHAs...")
 
-		pterm.DefaultSection.Println("Repack")
-		tarPath := filepath.Base(extractedDir) + "-REMAPPED.tar.gz"
-		repackSpinner, _ := pterm.DefaultSpinner.Start("Creating new archive...")
-		if err := archive.ReTarDir(extractedDir, tarPath); err != nil {
-			repackSpinner.Fail("Repack failed")
-			return fmt.Errorf("creating new archive: %w", err)
+		var (
+			stats      commitremap.Stats
+			summaryDir string
+			outPath    string
+		)
+
+		if strings.HasSuffix(archivePath, ".tar.gz") {
+			// Streaming path: remap in-flight without extracting to disk
+			outPath = strings.TrimSuffix(filepath.Base(archivePath), ".tar.gz") + "-REMAPPED.tar.gz"
+
+			stats, err = archive.StreamRemap(archivePath, outPath, commitMap, commitremap.DefaultPrefixes())
+			if err != nil {
+				spinner.Fail("Stream remap failed")
+				return fmt.Errorf("stream remap: %w", err)
+			}
+		} else {
+			// Directory path: remap files in-place on disk
+			threads, _ := cmd.Flags().GetInt("threads")
+			summaryDir = archivePath
+
+			stats, err = commitremap.ProcessFiles(archivePath, commitremap.DefaultPrefixes(), commitMap, commitremap.ProcessOptions{NumWorkers: threads})
+			if err != nil {
+				spinner.Fail("Remap failed")
+				renderSummaryTable(stats, archivePath)
+				return fmt.Errorf("remapping SHAs: %w", err)
+			}
 		}
-		repackSpinner.Success(fmt.Sprintf("Created %s", tarPath))
-		pterm.Success.Printfln("New archive created: %s", tarPath)
+
+		spinner.Success(fmt.Sprintf("Remapped %d SHAs across %d files (scanned %d)", stats.TotalReplacements(), stats.FilesChanged(), stats.FilesScanned))
+		renderSummaryTable(stats, summaryDir)
+		if outPath != "" {
+			pterm.Success.Printfln("New archive created: %s", outPath)
+		}
 
 		return nil
 	},

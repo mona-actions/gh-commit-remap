@@ -71,6 +71,10 @@ func ParseCommitMap(filePath string) (map[string]string, error) {
 	return commitMap, nil
 }
 
+type ProcessOptions struct {
+	NumWorkers int // 0 = NumCPU
+}
+
 // ProcessFiles rewrites SHAs in JSON metadata files matching <prefix>_*.json inside archiveDir.
 //
 // Each file is scanned byte-by-byte using a sliding window that matches
@@ -79,27 +83,38 @@ func ParseCommitMap(filePath string) (map[string]string, error) {
 //
 // numWorkers controls how many goroutines process files in parallel.
 // If numWorkers <= 0, it defaults to runtime.NumCPU().
-func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]string, numWorkers int) (Stats, error) {
+func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]string, opts ProcessOptions) (Stats, error) {
+
 	stats := Stats{PerFile: make(map[string]int)}
 
-	shaLen, err := commitMapSHALen(commitMap)
+	shaLen, err := CommitMapSHALen(commitMap)
 	if err != nil {
 		return stats, fmt.Errorf("validating commit map: %w", err)
 	}
 
-	if numWorkers <= 0 {
-		numWorkers = runtime.NumCPU()
+	if opts.NumWorkers <= 0 {
+		opts.NumWorkers = runtime.NumCPU()
 	}
 
 	// Collect all files to process
+	prefixSet := make(map[string]bool, len(prefixes))
+	for _, p := range prefixes {
+		prefixSet[p] = true
+	}
+
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		return stats, fmt.Errorf("reading archive dir %s: %w", archiveDir, err)
+	}
+
 	var allFiles []string
-	for _, prefix := range prefixes {
-		pattern := filepath.Join(archiveDir, prefix+"_*.json")
-		files, err := filepath.Glob(pattern)
-		if err != nil {
-			return stats, fmt.Errorf("globbing %s: %w", pattern, err)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
 		}
-		allFiles = append(allFiles, files...)
+		if ShouldRemap(entry.Name(), prefixSet) {
+			allFiles = append(allFiles, filepath.Join(archiveDir, entry.Name()))
+		}
 	}
 
 	stats.FilesScanned = len(allFiles)
@@ -118,7 +133,7 @@ func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]str
 	close(workCh)
 
 	var wg sync.WaitGroup
-	for w := 0; w < numWorkers; w++ {
+	for w := 0; w < opts.NumWorkers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -150,7 +165,7 @@ func updateMetadataFile(filePath string, commitMap map[string]string, shaLen int
 		return 0, fmt.Errorf("reading data: %w", err)
 	}
 
-	data, count := replaceSHABytes(data, commitMap, shaLen)
+	data, count := ReplaceSHABytes(data, commitMap, shaLen)
 	if count == 0 {
 		return 0, nil
 	}
@@ -178,9 +193,9 @@ func isHexByte(b byte) bool {
 	return hexTable[b]
 }
 
-// commitMapSHALen returns the SHA length common to every key in commitMap.
+// CommitMapSHALen returns the SHA length common to every key in commitMap.
 // It returns an error if the map is empty or if keys/values have different lengths.
-func commitMapSHALen(commitMap map[string]string) (int, error) {
+func CommitMapSHALen(commitMap map[string]string) (int, error) {
 	shaLen := 0
 	for old, new_ := range commitMap {
 		if shaLen == 0 {
@@ -215,7 +230,7 @@ func commitMapSHALen(commitMap map[string]string) (int, error) {
 //     if bytes 0–39 don't match, bytes 1–40 are checked next, etc.
 //
 // Returns the (potentially modified) byte slice and the replacement count.
-func replaceSHABytes(data []byte, commitMap map[string]string, shaLen int) ([]byte, int) {
+func ReplaceSHABytes(data []byte, commitMap map[string]string, shaLen int) ([]byte, int) {
 	count := 0
 	consecutiveHex := 0
 
@@ -244,6 +259,31 @@ func replaceSHABytes(data []byte, commitMap map[string]string, shaLen int) ([]by
 	}
 
 	return data, count
+}
+
+// ShouldRemap checks if a file name matches "<prefix>_<digits>.json"
+// for any prefix in the set.
+func ShouldRemap(name string, prefixSet map[string]bool) bool {
+	base := filepath.Base(name)
+	if !strings.HasSuffix(base, ".json") {
+		return false
+	}
+	stem := strings.TrimSuffix(base, ".json")
+	idx := strings.LastIndex(stem, "_")
+	if idx <= 0 {
+		return false
+	}
+	suffix := stem[idx+1:]
+	if len(suffix) == 0 {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	prefix := stem[:idx]
+	return prefixSet[prefix]
 }
 
 // summarize the work performed by a ProcessFiles call.

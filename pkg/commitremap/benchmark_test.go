@@ -108,7 +108,7 @@ func BenchmarkReplaceSHABytes(b *testing.B) {
 			b.SetBytes(int64(len(data)))
 			for b.Loop() {
 				copy(input, data)
-				replaceSHABytes(input, commitMap, shaLen)
+				ReplaceSHABytes(input, commitMap, shaLen)
 			}
 		})
 	}
@@ -125,7 +125,7 @@ func BenchmarkReplaceSHABytes_NoHits(b *testing.B) {
 	b.SetBytes(int64(len(data)))
 	for b.Loop() {
 		copy(input, data)
-		replaceSHABytes(input, differentMap, shaLen)
+		ReplaceSHABytes(input, differentMap, shaLen)
 	}
 }
 
@@ -208,7 +208,7 @@ func BenchmarkProcessFiles(b *testing.B) {
 				writeJSONFixtureFiles(b, baseDir, "pull_requests", c.numFiles, c.objPerFile, commitMap)
 				b.StartTimer()
 
-				ProcessFiles(baseDir, []string{"pull_requests"}, commitMap, c.workers)
+		ProcessFiles(baseDir, []string{"pull_requests"}, commitMap, ProcessOptions{NumWorkers: c.workers})
 			}
 		})
 	}
