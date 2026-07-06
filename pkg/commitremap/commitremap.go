@@ -33,6 +33,18 @@ type invalidCommitMapLineError struct {
 type Stats struct {
 	FilesScanned int
 	PerFile      map[string]int
+
+	// MetadataDirs holds the distinct directories (by tar entry path) that
+	// contained at least one remapped SHA-bearing metadata file. Populated by
+	// StreamRemap; empty for ProcessFiles. Callers can use it to detect empty
+	// archives (len 0) or unsupported multi-repo archives (len > 1).
+	MetadataDirs []string
+
+	// UnmatchedPrefixes holds the distinct prefixes of "<prefix>_<digits>.json"
+	// entries that did NOT match the remap prefix set. Populated by StreamRemap;
+	// empty for ProcessFiles. Callers can subtract their own known non-SHA
+	// prefixes to surface genuinely unrecognized metadata files.
+	UnmatchedPrefixes []string
 }
 
 func (e invalidCommitMapLineError) Error() string {
@@ -261,28 +273,39 @@ func ReplaceSHABytes(data []byte, commitMap map[string]string, shaLen int) ([]by
 	return data, count
 }
 
-// ShouldRemap checks if a file name matches "<prefix>_<digits>.json"
-// for any prefix in the set.
-func ShouldRemap(name string, prefixSet map[string]bool) bool {
+// MetadataPrefix reports the "<prefix>" of a metadata file named
+// "<prefix>_<digits>.json" (using only the base name), or ok=false if the
+// name does not match that shape. It is the shared classifier used by
+// ShouldRemap and by StreamRemap's layout reporting.
+func MetadataPrefix(name string) (prefix string, ok bool) {
 	base := filepath.Base(name)
-	if !strings.HasSuffix(base, ".json") {
-		return false
+	stem, ok := strings.CutSuffix(base, ".json")
+	if !ok {
+		return "", false
 	}
-	stem := strings.TrimSuffix(base, ".json")
 	idx := strings.LastIndex(stem, "_")
 	if idx <= 0 {
-		return false
+		return "", false
 	}
 	suffix := stem[idx+1:]
 	if len(suffix) == 0 {
-		return false
+		return "", false
 	}
 	for _, r := range suffix {
 		if r < '0' || r > '9' {
-			return false
+			return "", false
 		}
 	}
-	prefix := stem[:idx]
+	return stem[:idx], true
+}
+
+// ShouldRemap checks if a file name matches "<prefix>_<digits>.json"
+// for any prefix in the set.
+func ShouldRemap(name string, prefixSet map[string]bool) bool {
+	prefix, ok := MetadataPrefix(name)
+	if !ok {
+		return false
+	}
 	return prefixSet[prefix]
 }
 

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 
 	pgzip "github.com/klauspost/pgzip"
 
@@ -42,6 +44,13 @@ func StreamRemap(inArchive, outArchive string, commitMap map[string]string, pref
 	for _, p := range prefixes {
 		prefixSet[p] = true
 	}
+
+	// Layout accumulators, filled during the single streaming pass below.
+	// metadataDirs: distinct dirs holding matched SHA-bearing files.
+	// unmatchedPrefixes: distinct prefixes of "<prefix>_<digits>.json" entries
+	// that did not match prefixSet.
+	dirSeen := make(map[string]bool)
+	unmatchedSeen := make(map[string]bool)
 
 	// Open input tar.gz
 	inFile, err := os.Open(inArchive)
@@ -122,6 +131,22 @@ func StreamRemap(inArchive, outArchive string, commitMap map[string]string, pref
 			continue
 		}
 
+		// Classify this regular-file entry for layout reporting. Matched files
+		// contribute their directory; unmatched "<prefix>_<digits>.json" files
+		// contribute their prefix so callers can flag unrecognized metadata.
+		if prefix, ok := commitremap.MetadataPrefix(hdr.Name); ok {
+			if prefixSet[prefix] {
+				dir := path.Dir(path.Clean(hdr.Name))
+				if !dirSeen[dir] {
+					dirSeen[dir] = true
+					stats.MetadataDirs = append(stats.MetadataDirs, dir)
+				}
+			} else if !unmatchedSeen[prefix] {
+				unmatchedSeen[prefix] = true
+				stats.UnmatchedPrefixes = append(stats.UnmatchedPrefixes, prefix)
+			}
+		}
+
 		// Check if this file matches a SHA-bearing prefix
 		if hdr.Size >= 0 && commitremap.ShouldRemap(hdr.Name, prefixSet) {
 			if hdr.Size > maxMatchedFileSize {
@@ -185,6 +210,9 @@ func StreamRemap(inArchive, outArchive string, commitMap map[string]string, pref
 		return stats, fmt.Errorf("closing output file: %w", err)
 	}
 	fileClosed = true
+
+	sort.Strings(stats.MetadataDirs)
+	sort.Strings(stats.UnmatchedPrefixes)
 
 	return stats, nil
 }

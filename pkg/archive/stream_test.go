@@ -270,3 +270,100 @@ func TestStreamRemap_PreservesEntryOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamRemap_ReportsLayoutSingleDir(t *testing.T) {
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "in.tar.gz")
+	outPath := filepath.Join(dir, "out.tar.gz")
+
+	oldSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	newSHA := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	commitMap := map[string]string{oldSHA: newSHA}
+
+	entries := []tarEntry{
+		{name: "./", isDir: true},
+		{name: "./pull_requests_000001.json", data: `{"sha":"` + oldSHA + `"}`},
+		{name: "./issues_000001.json", data: `{"sha":"` + oldSHA + `"}`},
+		{name: "./users_000001.json", data: `{"name":"test"}`},         // known passthrough
+		{name: "./discussion_comments_000001.json", data: `{"x":"y"}`}, // unmatched prefix
+	}
+	makeTarGz(t, inPath, entries)
+
+	stats, err := StreamRemap(inPath, outPath, commitMap, []string{"pull_requests", "issues"})
+	if err != nil {
+		t.Fatalf("StreamRemap: %v", err)
+	}
+
+	if len(stats.MetadataDirs) != 1 || stats.MetadataDirs[0] != "." {
+		t.Errorf("MetadataDirs = %#v, want [\".\"]", stats.MetadataDirs)
+	}
+	// users and discussion_comments are both unmatched; both are reported here
+	// (callers subtract their own known non-SHA prefixes).
+	wantUnmatched := map[string]bool{"users": true, "discussion_comments": true}
+	if len(stats.UnmatchedPrefixes) != len(wantUnmatched) {
+		t.Fatalf("UnmatchedPrefixes = %#v, want keys %v", stats.UnmatchedPrefixes, wantUnmatched)
+	}
+	for _, p := range stats.UnmatchedPrefixes {
+		if !wantUnmatched[p] {
+			t.Errorf("unexpected unmatched prefix %q in %#v", p, stats.UnmatchedPrefixes)
+		}
+	}
+}
+
+func TestStreamRemap_ReportsMultipleMetadataDirs(t *testing.T) {
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "in.tar.gz")
+	outPath := filepath.Join(dir, "out.tar.gz")
+
+	oldSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	newSHA := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	commitMap := map[string]string{oldSHA: newSHA}
+
+	entries := []tarEntry{
+		{name: "./", isDir: true},
+		{name: "./repo-two/issues_000001.json", data: `{"sha":"` + oldSHA + `"}`},
+		{name: "./repo-one/issues_000001.json", data: `{"sha":"` + oldSHA + `"}`},
+	}
+	makeTarGz(t, inPath, entries)
+
+	stats, err := StreamRemap(inPath, outPath, commitMap, []string{"issues"})
+	if err != nil {
+		t.Fatalf("StreamRemap: %v", err)
+	}
+
+	want := []string{"repo-one", "repo-two"} // sorted
+	if len(stats.MetadataDirs) != len(want) {
+		t.Fatalf("MetadataDirs = %#v, want %v", stats.MetadataDirs, want)
+	}
+	for i, d := range want {
+		if stats.MetadataDirs[i] != d {
+			t.Errorf("MetadataDirs[%d] = %q, want %q", i, stats.MetadataDirs[i], d)
+		}
+	}
+}
+
+func TestStreamRemap_EmptyArchiveNoMetadataDirs(t *testing.T) {
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "in.tar.gz")
+	outPath := filepath.Join(dir, "out.tar.gz")
+
+	commitMap := map[string]string{
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}
+	entries := []tarEntry{
+		{name: "./", isDir: true},
+		{name: "./users_000001.json", data: `{"name":"test"}`},
+	}
+	makeTarGz(t, inPath, entries)
+
+	stats, err := StreamRemap(inPath, outPath, commitMap, []string{"pull_requests"})
+	if err != nil {
+		t.Fatalf("StreamRemap: %v", err)
+	}
+	if len(stats.MetadataDirs) != 0 {
+		t.Errorf("MetadataDirs = %#v, want empty", stats.MetadataDirs)
+	}
+	if len(stats.UnmatchedPrefixes) != 1 || stats.UnmatchedPrefixes[0] != "users" {
+		t.Errorf("UnmatchedPrefixes = %#v, want [\"users\"]", stats.UnmatchedPrefixes)
+	}
+}
