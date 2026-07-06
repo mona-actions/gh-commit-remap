@@ -85,10 +85,10 @@ func writeJSONFixtureFiles(tb testing.TB, dir string, prefix string, numFiles, n
 // This is the innermost hot loop — called once per metadata file.
 func BenchmarkReplaceSHABytes(b *testing.B) {
 	sizes := []struct {
-		name       string
-		mapSize    int
-		jsonObjs   int
-		shaFields  int
+		name      string
+		mapSize   int
+		jsonObjs  int
+		shaFields int
 	}{
 		{"small-map/small-json", 100, 50, 2},
 		{"large-map/small-json", 1_000_000, 50, 2},
@@ -208,7 +208,7 @@ func BenchmarkProcessFiles(b *testing.B) {
 				writeJSONFixtureFiles(b, baseDir, "pull_requests", c.numFiles, c.objPerFile, commitMap)
 				b.StartTimer()
 
-		ProcessFiles(baseDir, []string{"pull_requests"}, commitMap, ProcessOptions{NumWorkers: c.workers})
+				ProcessFiles(baseDir, []string{"pull_requests"}, commitMap, ProcessOptions{NumWorkers: c.workers})
 			}
 		})
 	}

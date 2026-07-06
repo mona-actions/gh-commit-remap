@@ -175,8 +175,8 @@ func TestShouldRemap(t *testing.T) {
 		{"./pull_requests_000001.json", true},
 		{"./issues_000002.json", true},
 		{"./users_000001.json", false},
-		{"./pull_requests.json", false},       // no _digits suffix
-		{"./pull_requests_abc.json", false},   // non-digit suffix
+		{"./pull_requests.json", false},         // no _digits suffix
+		{"./pull_requests_abc.json", false},     // non-digit suffix
 		{"./subdir/pull_requests_1.json", true}, // nested
 		{"./readme.md", false},
 		{"pull_requests_1.json", true},
