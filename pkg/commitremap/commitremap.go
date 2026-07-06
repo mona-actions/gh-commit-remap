@@ -2,18 +2,28 @@
 package commitremap
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 // DefaultPrefixes returns the set of archive metadata file prefixes that
 // gh-commit-remap rewrites by default. A fresh slice is returned on each
 // call so callers can mutate the result without affecting other callers.
 func DefaultPrefixes() []string {
-	return []string{"pull_requests", "issues", "issue_events"}
+	return []string{
+		"issues",
+		"issue_events",
+		"issue_comments",
+		"pull_requests",
+		"pull_request_reviews",
+		"pull_request_review_comments",
+		"pull_request_review_threads",
+		"commit_comments",
+	}
 }
 
 type invalidCommitMapLineError struct {
@@ -39,7 +49,7 @@ func ParseCommitMap(filePath string) (map[string]string, error) {
 		return nil, fmt.Errorf("reading commit map %s: %w", filePath, err)
 	}
 
-	for _, line := range strings.Split(string(content), "\n") {
+	for i, line := range strings.Split(string(content), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -50,65 +60,117 @@ func ParseCommitMap(filePath string) (map[string]string, error) {
 			return nil, fmt.Errorf("invalid commit map line: %w", lineErr)
 		}
 
+		// Skip the header line produced by git-filter-repo ("old new")
+		if i == 0 && fields[0] == "old" && fields[1] == "new" {
+			continue
+		}
+
 		commitMap[fields[0]] = fields[1]
 	}
 
 	return commitMap, nil
 }
 
+type ProcessOptions struct {
+	NumWorkers int // 0 = NumCPU
+}
+
 // ProcessFiles rewrites SHAs in JSON metadata files matching <prefix>_*.json inside archiveDir.
 //
-// Each file is walked once, replacing string values that exactly match a key in
-// commitMap. Only whole-string SHA values are replaced. SHAs embedded in URLs,
-// markdown, or composite strings are not rewritten.
-func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]string) (Stats, error) {
+// Each file is scanned byte-by-byte using a sliding window that matches
+// SHA-length hex sequences against the commit map. SHAs are replaced
+// wherever they appear — including inside URLs, markdown, etc.
+//
+// numWorkers controls how many goroutines process files in parallel.
+// If numWorkers <= 0, it defaults to runtime.NumCPU().
+func ProcessFiles(archiveDir string, prefixes []string, commitMap map[string]string, opts ProcessOptions) (Stats, error) {
+
 	stats := Stats{PerFile: make(map[string]int)}
 
-	for _, prefix := range prefixes {
-		pattern := filepath.Join(archiveDir, prefix+"_*.json")
-		files, err := filepath.Glob(pattern)
-		if err != nil {
-			return stats, fmt.Errorf("globbing %s: %w", pattern, err)
-		}
+	shaLen, err := CommitMapSHALen(commitMap)
+	if err != nil {
+		return stats, fmt.Errorf("validating commit map: %w", err)
+	}
 
-		for _, file := range files {
-			stats.FilesScanned++
-			n, err := updateMetadataFile(file, commitMap)
-			if err != nil {
-				return stats, fmt.Errorf("updating metadata file %s: %w", file, err)
-			}
-			if n > 0 {
-				stats.PerFile[file] = n
-			}
+	if opts.NumWorkers <= 0 {
+		opts.NumWorkers = runtime.NumCPU()
+	}
+
+	// Collect all files to process
+	prefixSet := make(map[string]bool, len(prefixes))
+	for _, p := range prefixes {
+		prefixSet[p] = true
+	}
+
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		return stats, fmt.Errorf("reading archive dir %s: %w", archiveDir, err)
+	}
+
+	var allFiles []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if ShouldRemap(entry.Name(), prefixSet) {
+			allFiles = append(allFiles, filepath.Join(archiveDir, entry.Name()))
 		}
 	}
 
-	return stats, nil
+	stats.FilesScanned = len(allFiles)
+
+	type fileResult struct {
+		file  string
+		count int
+		err   error
+	}
+
+	results := make([]fileResult, len(allFiles))
+	workCh := make(chan int, len(allFiles))
+	for i := range allFiles {
+		workCh <- i
+	}
+	close(workCh)
+
+	var wg sync.WaitGroup
+	for w := 0; w < opts.NumWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range workCh {
+				n, err := updateMetadataFile(allFiles[idx], commitMap, shaLen)
+				results[idx] = fileResult{file: allFiles[idx], count: n, err: err}
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Merge results in order, returning partial stats on first error
+	var firstErr error
+	for _, res := range results {
+		if res.count > 0 {
+			stats.PerFile[res.file] = res.count
+		}
+		if res.err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("updating metadata file %s: %w", res.file, res.err)
+		}
+	}
+
+	return stats, firstErr
 }
 
-func updateMetadataFile(filePath string, commitMap map[string]string) (int, error) {
+func updateMetadataFile(filePath string, commitMap map[string]string, shaLen int) (int, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return 0, fmt.Errorf("reading data: %w", err)
 	}
 
-	var dataMap interface{}
-	err = json.Unmarshal(data, &dataMap)
-	if err != nil {
-		return 0, fmt.Errorf("unmarshaling data: %w", err)
-	}
-
-	count := replaceSHA(dataMap, commitMap)
+	data, count := ReplaceSHABytes(data, commitMap, shaLen)
 	if count == 0 {
 		return 0, nil
 	}
 
-	updatedData, err := json.MarshalIndent(dataMap, "", "  ")
-	if err != nil {
-		return count, fmt.Errorf("marshaling updated data: %w", err)
-	}
-
-	err = os.WriteFile(filePath, updatedData, 0644)
+	err = os.WriteFile(filePath, data, 0644)
 	if err != nil {
 		return count, fmt.Errorf("writing updated data: %w", err)
 	}
@@ -116,37 +178,112 @@ func updateMetadataFile(filePath string, commitMap map[string]string) (int, erro
 	return count, nil
 }
 
-// replaceSHA walks data in place, rewriting whole-string values that match a
-// key in commitMap. It returns the number of replacements performed.
-func replaceSHA(data interface{}, commitMap map[string]string) int {
-	count := 0
-	switch v := data.(type) {
-	case map[string]interface{}:
-		for key, value := range v {
-			if str, ok := value.(string); ok {
-				if newSHA, hit := commitMap[str]; hit {
-					v[key] = newSHA
-					count++
-				}
-				continue
-			}
+var hexTable [256]bool
 
-			count += replaceSHA(value, commitMap)
+// init initializes the hexTable with valid hexadecimal characters (valid sha1 and sha256 characters).
+func init() {
+	for _, b := range []byte("0123456789abcdefABCDEF") {
+		hexTable[b] = true
+	}
+}
+
+// isHexByte reports whether b is a valid hexadecimal byte (0-9, a-f, A-F).
+// Uses a precomputed lookup table for branchless evaluation.
+func isHexByte(b byte) bool {
+	return hexTable[b]
+}
+
+// CommitMapSHALen returns the SHA length common to every key in commitMap.
+// It returns an error if the map is empty or if keys/values have different lengths.
+func CommitMapSHALen(commitMap map[string]string) (int, error) {
+	shaLen := 0
+	for old, new_ := range commitMap {
+		if shaLen == 0 {
+			shaLen = len(old)
+			if shaLen == 0 {
+				return 0, fmt.Errorf("commit map contains an empty key")
+			}
 		}
-	case []interface{}:
-		for i, value := range v {
-			if str, ok := value.(string); ok {
-				if newSHA, hit := commitMap[str]; hit {
-					v[i] = newSHA
-					count++
-				}
-				continue
-			}
-
-			count += replaceSHA(value, commitMap)
+		if len(old) != shaLen || len(new_) != shaLen {
+			return 0, fmt.Errorf("commit map SHAs have inconsistent lengths: expected %d, got key len %d / value len %d", shaLen, len(old), len(new_))
 		}
 	}
-	return count
+	if shaLen == 0 {
+		return 0, fmt.Errorf("commit map is empty")
+	}
+	return shaLen, nil
+}
+
+// replaceSHABytes scans data byte-by-byte using a sliding window of shaLen.
+//
+// Algorithm:
+//  1. Walk each byte, counting consecutive valid hex (SHA) bytes.
+//  2. When a non-hex byte is hit, reset the counter, no SHA can span it.
+//  3. Once we have shaLen consecutive hex bytes, extract that window and
+//     look it up in commitMap.
+//  4. On match: replace in-place, skip past the replaced bytes. The next
+//     window starts fresh from the byte after the replacement, avoiding
+//     re-scanning the bytes we just wrote.
+//  5. On no match: keep going. The counter grows past shaLen so the
+//     window slides forward by one byte each step, checking every
+//     overlapping shaLen-sized substring. For example with shaLen=40,
+//     if bytes 0–39 don't match, bytes 1–40 are checked next, etc.
+//
+// Returns the (potentially modified) byte slice and the replacement count.
+func ReplaceSHABytes(data []byte, commitMap map[string]string, shaLen int) ([]byte, int) {
+	count := 0
+	consecutiveHex := 0
+
+	for i := 0; i < len(data); i++ {
+		if isHexByte(data[i]) {
+			consecutiveHex++
+		} else {
+			// Non-hex byte breaks any potential SHA sequence.
+			consecutiveHex = 0
+			continue
+		}
+
+		// Once we have enough consecutive hex bytes, check if the last
+		// shaLen bytes match an entry in the commit map.
+		if consecutiveHex >= shaLen {
+			start := i - shaLen + 1
+			candidate := string(data[start : i+1])
+			if newSHA, ok := commitMap[candidate]; ok {
+				copy(data[start:i+1], newSHA)
+				count++
+				consecutiveHex = 0
+			}
+			// If no match, consecutiveHex keeps growing and the window
+			// slides forward on the next iteration.
+		}
+	}
+
+	return data, count
+}
+
+// ShouldRemap checks if a file name matches "<prefix>_<digits>.json"
+// for any prefix in the set.
+func ShouldRemap(name string, prefixSet map[string]bool) bool {
+	base := filepath.Base(name)
+	if !strings.HasSuffix(base, ".json") {
+		return false
+	}
+	stem := strings.TrimSuffix(base, ".json")
+	idx := strings.LastIndex(stem, "_")
+	if idx <= 0 {
+		return false
+	}
+	suffix := stem[idx+1:]
+	if len(suffix) == 0 {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	prefix := stem[:idx]
+	return prefixSet[prefix]
 }
 
 // summarize the work performed by a ProcessFiles call.

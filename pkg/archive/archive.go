@@ -8,7 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	pgzip "github.com/klauspost/pgzip"
 )
 
 // UnTar decompresses a .tar.gz file into destDir, returning the directory containing the extracted contents.
@@ -147,7 +150,8 @@ func ReTarDir(srcDir, outPath string) (retErr error) {
 	if err != nil {
 		return fmt.Errorf("failed to create archive: %w", err)
 	}
-	gzipWriter := gzip.NewWriter(outFile)
+	gzipWriter, _ := pgzip.NewWriterLevel(outFile, pgzip.BestSpeed)
+	gzipWriter.SetConcurrency(256<<10, runtime.NumCPU())
 	tarWriter := tar.NewWriter(gzipWriter)
 
 	// The success path closes each writer explicitly (in tar -> gzip -> file order)

@@ -91,6 +91,33 @@ func TestParseCommitMap(t *testing.T) {
 			content:     "oldSHA1 newSHA1\noldSHA2 newSHA2 extra\noldSHA3 newSHA3",
 			errContains: "oldSHA2 newSHA2 extra",
 		},
+		{
+			name: "skips git-filter-repo header line",
+			content: "old new\n" +
+				"abc123 def456\n" +
+				"ghi789 jkl012",
+			expected: map[string]string{
+				"abc123": "def456",
+				"ghi789": "jkl012",
+			},
+		},
+		{
+			name: "header with trailing CRLF",
+			content: "old new\r\n" +
+				"abc123 def456\r\n",
+			expected: map[string]string{
+				"abc123": "def456",
+			},
+		},
+		{
+			name: "old new as data when not on first line",
+			content: "abc123 def456\n" +
+				"old new",
+			expected: map[string]string{
+				"abc123": "def456",
+				"old":    "new",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -139,30 +166,203 @@ func TestParseCommitMap(t *testing.T) {
 	})
 }
 
+func TestShouldRemap(t *testing.T) {
+	prefixes := map[string]bool{"pull_requests": true, "issues": true}
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"./pull_requests_000001.json", true},
+		{"./issues_000002.json", true},
+		{"./users_000001.json", false},
+		{"./pull_requests.json", false},         // no _digits suffix
+		{"./pull_requests_abc.json", false},     // non-digit suffix
+		{"./subdir/pull_requests_1.json", true}, // nested
+		{"./readme.md", false},
+		{"pull_requests_1.json", true},
+	}
+	for _, tt := range tests {
+		if got := ShouldRemap(tt.name, prefixes); got != tt.want {
+			t.Errorf("ShouldRemap(%q) = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestIsHexByte(t *testing.T) {
+	valid := "0123456789abcdefABCDEF"
+	for _, b := range []byte(valid) {
+		if !isHexByte(b) {
+			t.Fatalf("isHexByte(%q) = false, want true", b)
+		}
+	}
+	invalid := "ghijklGHIJKL!@#$%^&*() \t\n{}\"/:"
+	for _, b := range []byte(invalid) {
+		if isHexByte(b) {
+			t.Fatalf("isHexByte(%q) = true, want false", b)
+		}
+	}
+}
+
+func TestCommitMapSHALen(t *testing.T) {
+	tests := []struct {
+		name        string
+		commitMap   map[string]string
+		wantLen     int
+		errContains string
+	}{
+		{
+			name:      "40-char SHAs",
+			commitMap: map[string]string{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+			wantLen:   40,
+		},
+		{
+			name:        "empty map",
+			commitMap:   map[string]string{},
+			errContains: "empty",
+		},
+		{
+			name:        "inconsistent lengths",
+			commitMap:   map[string]string{"aabb": "ccdd", "aabbcc": "ddeeff"},
+			errContains: "inconsistent",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CommitMapSHALen(tt.commitMap)
+			if tt.errContains != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q", tt.errContains)
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.wantLen {
+				t.Fatalf("CommitMapSHALen = %d, want %d", got, tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestReplaceSHABytes(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		commitMap map[string]string
+		shaLen    int
+		wantOut   string
+		wantCount int
+	}{
+		{
+			name:      "exact SHA replaced",
+			input:     `{"sha":"aabbccdd"}`,
+			commitMap: map[string]string{"aabbccdd": "11223344"},
+			shaLen:    8,
+			wantOut:   `{"sha":"11223344"}`,
+			wantCount: 1,
+		},
+		{
+			name:      "SHA in URL replaced",
+			input:     `{"url":"https://example.com/commit/aabbccdd/details"}`,
+			commitMap: map[string]string{"aabbccdd": "11223344"},
+			shaLen:    8,
+			wantOut:   `{"url":"https://example.com/commit/11223344/details"}`,
+			wantCount: 1,
+		},
+		{
+			name:      "SHA in markdown replaced",
+			input:     `{"body":"Fixed in aabbccdd, see also eeff0011"}`,
+			commitMap: map[string]string{"aabbccdd": "11223344", "eeff0011": "55667788"},
+			shaLen:    8,
+			wantOut:   `{"body":"Fixed in 11223344, see also 55667788"}`,
+			wantCount: 2,
+		},
+		{
+			name:      "non-hex byte breaks window",
+			input:     `aabbXccdd`,
+			commitMap: map[string]string{"aabbccdd": "11223344"},
+			shaLen:    8,
+			wantOut:   `aabbXccdd`,
+			wantCount: 0,
+		},
+		{
+			name:      "no match leaves data unchanged",
+			input:     `{"sha":"aabbccdd"}`,
+			commitMap: map[string]string{"11223344": "55667788"},
+			shaLen:    8,
+			wantOut:   `{"sha":"aabbccdd"}`,
+			wantCount: 0,
+		},
+		{
+			name:      "adjacent SHAs both replaced",
+			input:     `aabbccddeeff0011`,
+			commitMap: map[string]string{"aabbccdd": "11111111", "eeff0011": "22222222"},
+			shaLen:    8,
+			wantOut:   `1111111122222222`,
+			wantCount: 2,
+		},
+		{
+			name:      "40-char SHA replacement",
+			input:     `commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa done`,
+			commitMap: map[string]string{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+			shaLen:    40,
+			wantOut:   `commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb done`,
+			wantCount: 1,
+		},
+		{
+			name:      "multiple occurrences of same SHA",
+			input:     `aabbccdd and aabbccdd`,
+			commitMap: map[string]string{"aabbccdd": "11223344"},
+			shaLen:    8,
+			wantOut:   `11223344 and 11223344`,
+			wantCount: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := []byte(tt.input)
+			out, count := ReplaceSHABytes(data, tt.commitMap, tt.shaLen)
+			if string(out) != tt.wantOut {
+				t.Fatalf("output = %q, want %q", string(out), tt.wantOut)
+			}
+			if count != tt.wantCount {
+				t.Fatalf("count = %d, want %d", count, tt.wantCount)
+			}
+		})
+	}
+}
+
+// Use 40-char hex SHAs for ProcessFiles tests since commitMapSHALen validates.
+var testCommitMap = map[string]string{
+	"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "1111111111111111111111111111111111111111",
+	"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "2222222222222222222222222222222222222222",
+	"cccccccccccccccccccccccccccccccccccccccc": "3333333333333333333333333333333333333333",
+}
+
 func TestProcessFiles(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		dir := t.TempDir()
-		commitMap := map[string]string{
-			"oldSHA1": "newSHA1",
-			"oldSHA2": "newSHA2",
-			"oldSHA3": "newSHA3",
-		}
 
 		fixtures := map[string]struct {
 			input string
 			want  string
 		}{
 			"pull_requests_000001.json": {
-				input: `{"sha":"oldSHA1","url":"https://example.invalid/oldSHA1","nested":[{"head":"oldSHA2","body":"mention oldSHA3"}],"untouched":"keep"}`,
-				want:  `{"sha":"newSHA1","url":"https://example.invalid/oldSHA1","nested":[{"head":"newSHA2","body":"mention oldSHA3"}],"untouched":"keep"}`,
+				input: `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","url":"https://example.invalid/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","nested":[{"head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","body":"mention cccccccccccccccccccccccccccccccccccccccc"}],"untouched":"keep"}`,
+				want:  `{"sha":"1111111111111111111111111111111111111111","url":"https://example.invalid/2222222222222222222222222222222222222222","nested":[{"head":"2222222222222222222222222222222222222222","body":"mention 3333333333333333333333333333333333333333"}],"untouched":"keep"}`,
 			},
 			"issues_000001.json": {
-				input: `[{"events":[{"commit_id":"oldSHA2"},{"commit_id":"unknownSHA"}],"title":"oldSHA2 in title"}]`,
-				want:  `[{"events":[{"commit_id":"newSHA2"},{"commit_id":"unknownSHA"}],"title":"oldSHA2 in title"}]`,
+				input: `[{"events":[{"commit_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},{"commit_id":"dddddddddddddddddddddddddddddddddddddddd"}],"title":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb in title"}]`,
+				want:  `[{"events":[{"commit_id":"2222222222222222222222222222222222222222"},{"commit_id":"dddddddddddddddddddddddddddddddddddddddd"}],"title":"2222222222222222222222222222222222222222 in title"}]`,
 			},
 			"issue_events_000001.json": {
-				input: `{"items":[{"payload":{"before":"oldSHA3","after":"oldSHA1"}}],"count":1}`,
-				want:  `{"items":[{"payload":{"before":"newSHA3","after":"newSHA1"}}],"count":1}`,
+				input: `{"items":[{"payload":{"before":"cccccccccccccccccccccccccccccccccccccccc","after":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],"count":1}`,
+				want:  `{"items":[{"payload":{"before":"3333333333333333333333333333333333333333","after":"1111111111111111111111111111111111111111"}}],"count":1}`,
 			},
 		}
 
@@ -173,13 +373,19 @@ func TestProcessFiles(t *testing.T) {
 			writeFile(t, p, fixture.input)
 		}
 
-		stats, err := ProcessFiles(dir, DefaultPrefixes(), commitMap)
+		stats, err := ProcessFiles(dir, DefaultPrefixes(), testCommitMap, ProcessOptions{})
 		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
 		for name, fixture := range fixtures {
-			assertJSONFileEqual(t, filepath.Join(dir, name), fixture.want)
+			got, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			if string(got) != fixture.want {
+				t.Fatalf("file %s = %q, want %q", name, string(got), fixture.want)
+			}
 		}
 
 		if got, want := stats.FilesScanned, 3; got != want {
@@ -188,10 +394,10 @@ func TestProcessFiles(t *testing.T) {
 		if got, want := stats.FilesChanged(), 3; got != want {
 			t.Fatalf("FilesChanged() = %d, want %d", got, want)
 		}
-		// pull_requests: sha=oldSHA1, nested[0].head=oldSHA2 -> 2
-		// issues: events[0].commit_id=oldSHA2 -> 1
-		// issue_events: payload.before=oldSHA3, payload.after=oldSHA1 -> 2
-		if got, want := stats.TotalReplacements(), 5; got != want {
+		// pull_requests: sha + url + nested.head + nested.body = 4
+		// issues: events[0].commit_id + title = 2
+		// issue_events: payload.before + payload.after = 2
+		if got, want := stats.TotalReplacements(), 8; got != want {
 			t.Fatalf("TotalReplacements() = %d, want %d", got, want)
 		}
 		for name := range fixtures {
@@ -204,18 +410,18 @@ func TestProcessFiles(t *testing.T) {
 	t.Run("empty commit map", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "pull_requests_000001.json")
-		want := `{"sha":"oldSHA1","nested":[{"sha":"oldSHA2"}]}`
+		want := `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nested":[{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`
 		writeFile(t, filePath, want)
 
-		if _, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{}); err != nil {
-			t.Fatalf("ProcessFiles returned error: %v", err)
+		_, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{}, ProcessOptions{})
+		if err == nil {
+			t.Fatal("expected error for empty commit map")
 		}
-
-		assertJSONFileEqual(t, filePath, want)
 	})
 
 	t.Run("no matching files", func(t *testing.T) {
-		if _, err := ProcessFiles(t.TempDir(), DefaultPrefixes(), map[string]string{"oldSHA1": "newSHA1"}); err != nil {
+		_, err := ProcessFiles(t.TempDir(), DefaultPrefixes(), testCommitMap, ProcessOptions{})
+		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 	})
@@ -224,16 +430,22 @@ func TestProcessFiles(t *testing.T) {
 		dir := t.TempDir()
 		fooPath := filepath.Join(dir, "foo_000001.json")
 		pullPath := filepath.Join(dir, "pull_requests_000001.json")
-		writeFile(t, fooPath, `{"sha":"oldSHA1"}`)
-		writeFile(t, pullPath, `{"sha":"oldSHA1"}`)
+		writeFile(t, fooPath, `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
+		writeFile(t, pullPath, `{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 
-		stats, err := ProcessFiles(dir, []string{"foo"}, map[string]string{"oldSHA1": "newSHA1"})
+		stats, err := ProcessFiles(dir, []string{"foo"}, testCommitMap, ProcessOptions{})
 		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
-		assertJSONFileEqual(t, fooPath, `{"sha":"newSHA1"}`)
-		assertJSONFileEqual(t, pullPath, `{"sha":"oldSHA1"}`)
+		got, _ := os.ReadFile(fooPath)
+		if !strings.Contains(string(got), "1111111111111111111111111111111111111111") {
+			t.Fatalf("foo file should have SHA replaced, got %s", string(got))
+		}
+		got2, _ := os.ReadFile(pullPath)
+		if strings.Contains(string(got2), "1111111111111111111111111111111111111111") {
+			t.Fatal("pull_requests file should NOT have been processed with custom prefix")
+		}
 
 		if got, want := len(stats.PerFile), 1; got != want {
 			t.Fatalf("len(stats.PerFile) = %d, want %d", got, want)
@@ -249,37 +461,53 @@ func TestProcessFiles(t *testing.T) {
 	t.Run("single-pass behavior remaps all keys", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "pull_requests_000001.json")
-		writeFile(t, filePath, `{"items":[{"sha":"oldSHA1"},{"nested":{"sha":"oldSHA2","children":["oldSHA3","oldSHA4"]}}]}`)
+		writeFile(t, filePath, `{"items":[{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"nested":{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","children":["cccccccccccccccccccccccccccccccccccccccc"]}}]}`)
 
-		commitMap := map[string]string{
-			"oldSHA1": "newSHA1",
-			"oldSHA2": "newSHA2",
-			"oldSHA3": "newSHA3",
-			"oldSHA4": "newSHA4",
-		}
-		if _, err := ProcessFiles(dir, []string{"pull_requests"}, commitMap); err != nil {
+		if _, err := ProcessFiles(dir, []string{"pull_requests"}, testCommitMap, ProcessOptions{}); err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
-		assertJSONFileEqual(t, filePath, `{"items":[{"sha":"newSHA1"},{"nested":{"sha":"newSHA2","children":["newSHA3","newSHA4"]}}]}`)
+		got, _ := os.ReadFile(filePath)
+		gotStr := string(got)
+		for _, expected := range []string{"1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222", "3333333333333333333333333333333333333333"} {
+			if !strings.Contains(gotStr, expected) {
+				t.Fatalf("expected %s in output, got %s", expected, gotStr)
+			}
+		}
 	})
 
-	t.Run("non matching strings unchanged", func(t *testing.T) {
+	t.Run("SHAs in URLs and markdown are now replaced", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "issues_000001.json")
-		original := `{"title":"no SHA here","body":"https://example.invalid/oldSHA1","labels":["bug","help wanted"]}`
-		writeFile(t, filePath, original)
+		input := `{"title":"no SHA here","body":"https://example.invalid/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","labels":["bug","help wanted"]}`
+		writeFile(t, filePath, input)
 
-		if _, err := ProcessFiles(dir, []string{"issues"}, map[string]string{"oldSHA1": "newSHA1"}); err != nil {
+		stats, err := ProcessFiles(dir, []string{"issues"}, testCommitMap, ProcessOptions{})
+		if err != nil {
 			t.Fatalf("ProcessFiles returned error: %v", err)
 		}
 
-		assertJSONFileEqual(t, filePath, original)
+		got, _ := os.ReadFile(filePath)
+		if !strings.Contains(string(got), "1111111111111111111111111111111111111111") {
+			t.Fatalf("SHA in URL should be replaced, got %s", string(got))
+		}
+		if stats.TotalReplacements() != 1 {
+			t.Fatalf("TotalReplacements() = %d, want 1", stats.TotalReplacements())
+		}
 	})
 }
 
 func TestDefaultPrefixes(t *testing.T) {
-	want := []string{"pull_requests", "issues", "issue_events"}
+	want := []string{
+		"issues",
+		"issue_events",
+		"issue_comments",
+		"pull_requests",
+		"pull_request_reviews",
+		"pull_request_review_comments",
+		"pull_request_review_threads",
+		"commit_comments",
+	}
 	got := DefaultPrefixes()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultPrefixes() = %#v, want %#v", got, want)
@@ -296,7 +524,7 @@ func TestDefaultPrefixes(t *testing.T) {
 func TestProcessFiles_SkipsWriteWhenNoReplacements(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "pull_requests_000001.json")
-	original := []byte(`{"sha":"someSHA","nested":[{"sha":"otherSHA"}]}`)
+	original := []byte(`{"sha":"dddddddddddddddddddddddddddddddddddddddd","nested":[{"sha":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}]}`)
 	if err := os.WriteFile(filePath, original, 0644); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
@@ -305,7 +533,11 @@ func TestProcessFiles_SkipsWriteWhenNoReplacements(t *testing.T) {
 		t.Fatalf("stat before: %v", err)
 	}
 
-	stats, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{"unrelated": "x"})
+	// commitMap doesn't contain the SHAs in the file
+	noMatchMap := map[string]string{
+		"ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00": "1100110011001100110011001100110011001100",
+	}
+	stats, err := ProcessFiles(dir, []string{"pull_requests"}, noMatchMap, ProcessOptions{})
 	if err != nil {
 		t.Fatalf("ProcessFiles returned error: %v", err)
 	}
@@ -334,29 +566,6 @@ func TestProcessFiles_SkipsWriteWhenNoReplacements(t *testing.T) {
 	}
 	if len(stats.PerFile) != 0 {
 		t.Fatalf("len(PerFile) = %d, want 0", len(stats.PerFile))
-	}
-}
-
-func TestProcessFiles_ReturnsPartialStatsOnError(t *testing.T) {
-	dir := t.TempDir()
-	// filepath.Glob returns sorted results, so pull_requests_000001.json is processed before pull_requests_000002.json.
-	validPath := filepath.Join(dir, "pull_requests_000001.json")
-	badPath := filepath.Join(dir, "pull_requests_000002.json")
-	writeFile(t, validPath, `{"sha":"oldSHA1"}`)
-	writeFile(t, badPath, `{not valid json`)
-
-	stats, err := ProcessFiles(dir, []string{"pull_requests"}, map[string]string{"oldSHA1": "newSHA1"})
-	if err == nil {
-		t.Fatal("expected error from malformed JSON file")
-	}
-	if stats.FilesScanned != 2 {
-		t.Fatalf("FilesScanned = %d, want 2", stats.FilesScanned)
-	}
-	if len(stats.PerFile) < 1 {
-		t.Fatalf("len(PerFile) = %d, want >= 1", len(stats.PerFile))
-	}
-	if _, ok := stats.PerFile[validPath]; !ok {
-		t.Fatalf("PerFile must contain validPath %q; got %#v", validPath, stats.PerFile)
 	}
 }
 
