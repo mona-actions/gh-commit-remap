@@ -14,7 +14,7 @@ import (
 	"github.com/mona-actions/gh-commit-remap/pkg/commitremap"
 )
 
-const maxMatchedFileSize = 2 << 30 // 2 GB guard for matched entries
+const maxMatchedFileSize int64 = 2 << 30 // 2 GB guard for matched entries
 
 // StreamRemap reads a .tar.gz migration archive, remaps SHAs in matching
 // JSON metadata files in-flight, and writes the result to a new .tar.gz.
